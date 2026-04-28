@@ -80,7 +80,7 @@ const WorkspaceSwitcher = ({ compact = false }) => {
 const WorkspaceMenu = ({ users, currentId, onPick, onClose }) => (
   <>
     <div className="fixed inset-0 z-40" onClick={onClose} />
-    <div className="absolute bottom-full mb-2 left-0 right-0 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden">
+    <div className="absolute top-full mt-2 left-0 right-0 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden">
       <p className="px-3 py-2 text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
         Switch workspace
       </p>
