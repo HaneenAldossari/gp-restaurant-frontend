@@ -5,7 +5,7 @@ const KPICard = ({
   value,
   icon: Icon,
   trend = 'neutral',
-  trendValue = 0,
+  trendValue = null,
   prefix = '',
   suffix = '',
   comparisonText = 'vs last month',
@@ -13,6 +13,9 @@ const KPICard = ({
   iconColor = 'text-primary-600',
   loading = false
 }) => {
+  // Show the comparison row only when the caller explicitly provides a
+  // trend value — otherwise the card is a plain metric with no arrow.
+  const hasTrend = trendValue !== null && trendValue !== undefined;
   const formatValue = (val) => {
     if (typeof val === 'number') {
       return val.toLocaleString('en-US', {
@@ -60,11 +63,13 @@ const KPICard = ({
           <p className="metric-value text-gray-900 dark:text-white">
             {prefix}{formatValue(value)}{suffix}
           </p>
-          <div className={`flex items-center gap-1 text-sm font-medium ${getTrendColor()}`}>
-            {getTrendIcon()}
-            <span>{Math.abs(trendValue)}%</span>
-            <span className="text-gray-400 font-normal dark:text-gray-500">{comparisonText}</span>
-          </div>
+          {hasTrend && (
+            <div className={`flex items-center gap-1 text-sm font-medium ${getTrendColor()}`}>
+              {getTrendIcon()}
+              <span>{Math.abs(trendValue)}%</span>
+              <span className="text-gray-400 font-normal dark:text-gray-500">{comparisonText}</span>
+            </div>
+          )}
         </div>
         {Icon && (
           <div className={`p-3 rounded-xl ${iconBgColor} dark:bg-opacity-20`}>

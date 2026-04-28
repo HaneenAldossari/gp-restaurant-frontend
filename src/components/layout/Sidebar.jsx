@@ -9,7 +9,6 @@ import {
   ChevronLeft,
   ChevronRight,
   User,
-  Upload as UploadIcon,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -27,21 +26,15 @@ const Sidebar = ({ isOpen, onToggle }) => {
       roles: ['Admin', 'Manager', 'Cashier']
     },
     {
-      path: '/upload',
-      icon: UploadIcon,
-      label: 'Upload Data',
-      roles: ['Admin', 'Manager', 'Cashier']
+      path: '/forecasting',
+      icon: TrendingUp,
+      label: 'Forecasting',
+      roles: ['Admin', 'Manager']
     },
     {
       path: '/menu-engineering',
       icon: Utensils,
       label: 'Menu Insights',
-      roles: ['Admin', 'Manager']
-    },
-    {
-      path: '/forecasting',
-      icon: TrendingUp,
-      label: 'Forecasting',
       roles: ['Admin', 'Manager']
     },
     {

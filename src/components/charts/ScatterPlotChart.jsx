@@ -24,29 +24,27 @@ const CustomTooltip = ({ active, payload }) => {
       <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 max-w-xs">
         <p className="text-sm font-semibold text-gray-900 dark:text-white mb-2">{data.name}</p>
         <div className="space-y-1 text-sm">
+          {data.category && (
+            <p className="text-gray-600 dark:text-gray-400">
+              Category: <span className="font-medium text-gray-900 dark:text-white">{data.category}</span>
+            </p>
+          )}
           <p className="text-gray-600 dark:text-gray-400">
-            Category: <span className="font-medium text-gray-900 dark:text-white">{data.category}</span>
+            Popularity: <span className="font-medium text-gray-900 dark:text-white">{data.popularity}% of menu</span>
           </p>
-          <p className="text-gray-600 dark:text-gray-400">
-            Sales: <span className="font-medium text-gray-900 dark:text-white">{data.popularity} units</span>
-          </p>
+          {data.qtySold != null && (
+            <p className="text-gray-600 dark:text-gray-400">
+              Units sold: <span className="font-medium text-gray-900 dark:text-white">{data.qtySold.toLocaleString()}</span>
+            </p>
+          )}
           <p className="text-gray-600 dark:text-gray-400">
             Profit Margin: <span className="font-medium text-gray-900 dark:text-white">{data.profitability}%</span>
           </p>
-          <p className="text-gray-600 dark:text-gray-400">
-            Revenue: <span className="font-medium text-gray-900 dark:text-white">{data.revenue?.toLocaleString()} SAR</span>
-          </p>
-          <p className="text-gray-600 dark:text-gray-400">
-            Class: <span
-              className="font-medium px-2 py-0.5 rounded text-xs"
-              style={{
-                backgroundColor: `${classificationColors[data.classification]}20`,
-                color: classificationColors[data.classification]
-              }}
-            >
-              {data.classification}
-            </span>
-          </p>
+          {data.revenue != null && (
+            <p className="text-gray-600 dark:text-gray-400">
+              Revenue: <span className="font-medium text-gray-900 dark:text-white">{data.revenue.toLocaleString()} SAR</span>
+            </p>
+          )}
         </div>
       </div>
     );
@@ -93,8 +91,9 @@ const ScatterPlotChart = ({
               dataKey="popularity"
               name="Popularity"
               tick={{ fontSize: 12, fill: '#6b7280' }}
+              unit="%"
               label={{
-                value: 'Popularity (Sales Volume)',
+                value: 'Popularity (% of total menu sales)',
                 position: 'bottom',
                 offset: 40,
                 fill: '#6b7280',

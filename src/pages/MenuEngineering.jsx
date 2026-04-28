@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Filter, Info, AlertCircle, Sparkles, RotateCcw, Database, Lightbulb, CheckCircle2, AlertTriangle, ThumbsDown } from 'lucide-react';
 import ScatterPlotChart from '../components/charts/ScatterPlotChart';
 import DataTable from '../components/ui/DataTable';
-import { fetchMenuEngineering, simulateWhatIf } from '../lib/api';
+import { fetchMenuEngineering, simulateWhatIf, fetchDataRange } from '../lib/api';
 import EmptyState from '../components/ui/EmptyState';
 import { getClassification, describeTransition } from '../lib/classification';
 
@@ -20,6 +20,8 @@ const MenuEngineering = () => {
   const [sim, setSim] = useState(null);
   const [simLoading, setSimLoading] = useState(false);
 
+  const [dataRange, setDataRange] = useState(null);
+
   // Load menu engineering data
   useEffect(() => {
     let alive = true;
@@ -31,10 +33,26 @@ const MenuEngineering = () => {
     return () => { alive = false; };
   }, []);
 
+  // Separately fetch the dataset window so the simulator can phrase its
+  // projections with a real timeframe instead of vague "than today".
+  useEffect(() => {
+    fetchDataRange().then(setDataRange).catch(() => {});
+  }, []);
+
+  const historyDays = dataRange?.totalDays || null;
+
   const targetItem = useMemo(
     () => data?.items?.find((i) => i.name === targetName) || null,
     [data, targetName]
   );
+
+  // Reset the sliders whenever the manager selects a different item, so
+  // each item starts at its own current price rather than inheriting the
+  // previous item's slider position.
+  useEffect(() => {
+    setPriceDelta(0);
+    setCostDelta(0);
+  }, [targetName]);
 
   // Fetch simulation whenever item or sliders change. We always fetch (even
   // at priceDelta=0) so scenarios and advice are visible as soon as an item
@@ -54,11 +72,27 @@ const MenuEngineering = () => {
 
   const hasChange = priceDelta !== 0 || costDelta !== 0;
 
-  // Simple verdict rules, translated to plain English:
-  //   good    → profit goes up and fewer than 15% of customers walk away
+  // Verdict rules.
+  //
+  // For Dog (Underperformer) and Puzzle (Hidden gem), the pure constant-
+  // elasticity profit model is misleading in BOTH directions:
+  //  - Raising the price: model often predicts higher profit (because
+  //    demand is tiny, so the qty drop matters little), but in reality
+  //    raising prices on a failing item accelerates its decline. → bad.
+  //  - Discounting: model shows profit dipping because margin shrinks on
+  //    already-low volume. But a discount is the recommended recovery
+  //    strategy — menu-engineering theory says test price-cuts, promote,
+  //    or replace. Short-term profit sacrifice is the cost of finding
+  //    out whether the item can be saved. → good (aligned with strategy).
+  //
+  //   good    → profit goes up and fewer than 15% of customers walk away,
+  //             OR a price cut on a Dog/Puzzle (strategic test)
   //   risky   → profit goes up but more than 15% fewer customers
-  //   bad     → profit goes down
-  function verdictFor(currentQty, newQty, currentProfit, newProfit) {
+  //   bad     → profit goes down, OR a price raise on a Dog/Puzzle
+  function verdictFor(currentQty, newQty, currentProfit, newProfit, priceWentUp, priceWentDown, classification) {
+    const isDogOrPuzzle = classification === 'Dog' || classification === 'Puzzle';
+    if (priceWentUp && isDogOrPuzzle) return 'bad';
+    if (priceWentDown && isDogOrPuzzle) return 'good';
     if (newProfit <= currentProfit) return 'bad';
     if (newQty < currentQty * 0.85) return 'risky';
     return 'good';
@@ -188,6 +222,9 @@ const MenuEngineering = () => {
           profitability: item.profitMargin,
           name: item.name,
           classification: item.classification,
+          qtySold: item.qtySold,
+          revenue: item.revenue,
+          category: item.category,
         }))}
         title="Popularity vs Profit Margin"
         avgPopularity={data?.avgPopularity}
@@ -272,7 +309,7 @@ const MenuEngineering = () => {
                 );
               })()}
               <span className="text-xs text-gray-500 dark:text-gray-400">
-                {targetItem.category} · {targetItem.qtySold.toLocaleString()} sold
+                {targetItem.category} · {targetItem.qtySold.toLocaleString()} units sold {historyDays ? `over ${historyDays} days` : ''}
               </span>
               <button
                 onClick={resetSim}
@@ -287,13 +324,36 @@ const MenuEngineering = () => {
               const op = sim.recommendations.optimalPrice;
               const currentPriceInt = Math.round(targetItem.price);
               const suggestedInt = op.price;
-              const sameAsCurrent = suggestedInt === currentPriceInt;
+              const direction = op.direction || (suggestedInt > currentPriceInt ? 'raise' : suggestedInt < currentPriceInt ? 'lower' : 'hold');
+              const sameAsCurrent = direction === 'hold';
+              const changePct = op.priceChangePct;
+              const transitionChanged = op.currentClassification && op.newClassification && op.currentClassification !== op.newClassification;
+              const fromClass = op.currentClassification ? getClassification(op.currentClassification) : null;
+              const toClass = op.newClassification ? getClassification(op.newClassification) : null;
+
+              // Direction-aware styling so a "raise" reads green and a
+              // "lower" reads as a deliberate discount, not a warning.
+              const dirStyle = {
+                raise: { tag: 'Raise the price', tagBg: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300', arrow: '↑' },
+                lower: { tag: 'Lower the price', tagBg: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300',           arrow: '↓' },
+                hold:  { tag: 'Hold the price',  tagBg: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',          arrow: '=' },
+              }[direction];
+
               return (
                 <div className="p-5 rounded-xl bg-gradient-to-br from-primary-50 to-primary-100 dark:from-primary-900/30 dark:to-primary-900/10 border border-primary-200 dark:border-primary-800">
-                  <p className="text-xs font-medium text-primary-700 dark:text-primary-300 uppercase tracking-wide flex items-center gap-1.5">
-                    <Lightbulb size={13} className="text-amber-500" />
-                    Suggested price
-                  </p>
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <p className="text-xs font-medium text-primary-700 dark:text-primary-300 uppercase tracking-wide flex items-center gap-1.5">
+                      <Lightbulb size={13} className="text-amber-500" />
+                      Suggested price
+                    </p>
+                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold ${dirStyle.tagBg}`}>
+                      <span className="text-sm leading-none">{dirStyle.arrow}</span>
+                      {op.directionLabel || dirStyle.tag}
+                      {changePct != null && !sameAsCurrent && (
+                        <span className="opacity-80">({changePct > 0 ? '+' : ''}{changePct}%)</span>
+                      )}
+                    </span>
+                  </div>
                   {sameAsCurrent ? (
                     <>
                       <p className="text-2xl font-bold text-primary-900 dark:text-primary-100 mt-1">
@@ -310,11 +370,48 @@ const MenuEngineering = () => {
                       </p>
                       <p className="text-sm text-primary-700 dark:text-primary-300 mt-1">
                         Current price: SAR {currentPriceInt}
+                        {' '}
+                        {direction === 'raise' ? <>(<span className="font-medium">a small price bump would likely raise profit</span>)</>
+                          : direction === 'lower' ? <>(<span className="font-medium">a small discount could unlock more demand</span>)</>
+                          : null}
                       </p>
                       <p className="text-sm text-primary-700 dark:text-primary-300 mt-2">
                         {op.rationale}
                       </p>
                     </>
+                  )}
+
+                  {/* Classification transition — what category does this item move to? */}
+                  {fromClass && toClass && (
+                    <div className="mt-4 pt-4 border-t border-primary-200 dark:border-primary-800/50">
+                      <p className="text-[11px] font-medium text-primary-700 dark:text-primary-300 uppercase tracking-wide mb-2">
+                        Item category
+                      </p>
+                      <div className="flex items-center gap-2 flex-wrap text-sm">
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${fromClass.bg} ${fromClass.text} border ${fromClass.border}`}>
+                          {fromClass.emoji} {fromClass.label}
+                        </span>
+                        {transitionChanged ? (
+                          <>
+                            <span className="text-primary-600 dark:text-primary-400 font-bold">→</span>
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${toClass.bg} ${toClass.text} border ${toClass.border}`}>
+                              {toClass.emoji} {toClass.label}
+                            </span>
+                            <span className="text-xs text-primary-700 dark:text-primary-300 ml-1">
+                              {direction === 'raise' && op.newClassification === 'Star' && 'profit lift moves it into the Hero band'}
+                              {direction === 'lower' && op.newClassification === 'Star' && 'higher demand pushes it into the Hero band'}
+                              {direction === 'lower' && op.newClassification === 'Plowhorse' && 'discount drives volume up at the cost of margin'}
+                              {direction === 'raise' && op.newClassification === 'Puzzle' && 'higher margin offsets the smaller crowd'}
+                              {op.newClassification === 'Dog' && 'watch it carefully — risk of slipping further'}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-xs text-gray-600 dark:text-gray-400">
+                            stays in the same band — change is too small to reshape the item's role on the menu
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
               );
@@ -368,95 +465,113 @@ const MenuEngineering = () => {
               const newQty = sim.simulated.projectedQty;
               const currQty = sim.current.qtySold;
               const profitDiff = Math.round(sim.simulated.newProfit - sim.current.profit);
-              const verdict = verdictFor(currQty, newQty, sim.current.profit, sim.simulated.newProfit);
+              const priceWentUp = priceDelta > 0;
+              const priceWentDown = priceDelta < 0;
+              const itemClass = targetItem?.classification;
+              const verdict = verdictFor(currQty, newQty, sim.current.profit, sim.simulated.newProfit, priceWentUp, priceWentDown, itemClass);
+
+              // Tailored body text for the two Dog/Puzzle cases where the
+              // verdict overrides the pure profit math.
+              const isDogOrPuzzle = itemClass === 'Dog' || itemClass === 'Puzzle';
+              const dogPuzzleRaiseBody = itemClass === 'Dog'
+                ? 'Wrong direction for an Underperformer. Discount or replace.'
+                : 'Wrong direction for a Hidden gem. Discount to unlock demand.';
+              const dogPuzzleDiscountBody = itemClass === 'Dog'
+                ? 'Aligned with strategy — discounting an Underperformer is the recommended test. Short-term profit may dip, but that’s the cost of finding out if the item can recover.'
+                : 'Aligned with strategy — a Hidden gem often picks up with a discount. Run this as a 2–4 week test and watch demand.';
+
+              let goodBody = 'Profit up, demand holds. Safe to try.';
+              let badBody = 'Profit drops. Try a different price.';
+              if (priceWentDown && isDogOrPuzzle) goodBody = dogPuzzleDiscountBody;
+              if (priceWentUp && isDogOrPuzzle)   badBody = dogPuzzleRaiseBody;
 
               const verdictStyles = {
-                good:  { bg: 'bg-success-50 dark:bg-success-900/20',  border: 'border-success-200 dark:border-success-800',  text: 'text-success-700 dark:text-success-300', title: 'Good idea',           Icon: CheckCircle2,  body: 'Profit goes up and customers will still buy. This kind of change is usually safe to try.' },
-                risky: { bg: 'bg-amber-50 dark:bg-amber-900/20',      border: 'border-amber-200 dark:border-amber-800',      text: 'text-amber-700 dark:text-amber-300',    title: 'Risky',              Icon: AlertTriangle, body: 'Profit goes up, but you may lose a noticeable number of customers. Watch closely if you try it.' },
-                bad:   { bg: 'bg-danger-50 dark:bg-danger-900/20',    border: 'border-danger-200 dark:border-danger-800',    text: 'text-danger-700 dark:text-danger-300',  title: 'Not recommended',    Icon: ThumbsDown,    body: 'This change lowers your profit. Consider a different price.' },
+                good:  { bg: 'bg-success-50 dark:bg-success-900/20',  border: 'border-success-200 dark:border-success-800',  text: 'text-success-700 dark:text-success-300', title: 'Good idea',       Icon: CheckCircle2,  body: goodBody },
+                risky: { bg: 'bg-amber-50 dark:bg-amber-900/20',      border: 'border-amber-200 dark:border-amber-800',      text: 'text-amber-700 dark:text-amber-300',    title: 'Risky',           Icon: AlertTriangle, body: 'Profit up, but you lose noticeable demand. Monitor closely.' },
+                bad:   { bg: 'bg-danger-50 dark:bg-danger-900/20',    border: 'border-danger-200 dark:border-danger-800',    text: 'text-danger-700 dark:text-danger-300',  title: 'Not recommended', Icon: ThumbsDown,    body: badBody },
               }[verdict];
               const VerdictIcon = verdictStyles.Icon;
 
+              // Per-month projections so the numbers feel concrete. We
+              // scale the whole-history totals to a 30-day equivalent using
+              // the uploaded window length.
+              const monthlyCurrQty  = historyDays ? Math.round(currQty / historyDays * 30) : null;
+              const monthlyNewQty   = historyDays ? Math.round(newQty  / historyDays * 30) : null;
+              const monthlyProfitDiff = historyDays
+                ? Math.round((sim.simulated.newProfit - sim.current.profit) / historyDays * 30)
+                : null;
+              const qtyDeltaPct = currQty > 0 ? Math.round((newQty - currQty) / currQty * 100) : 0;
               return (
                 <>
-                  <div className="p-4 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-                    <p className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-                      What will happen at this price
+                  <div className="p-5 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+                    <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-4">
+                      At SAR {Math.round(targetItem.price + priceDelta)} (vs actual)
                     </p>
-                    <ul className="space-y-2 text-sm text-gray-700 dark:text-gray-300 list-disc pl-5">
-                      <li>
-                        About <strong>{newQty.toLocaleString()}</strong> customers will buy it
-                        {' '}(currently {currQty.toLocaleString()}).
-                      </li>
-                      <li>
-                        You'll earn{' '}
-                        <strong className={profitDiff >= 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Units sold</p>
+                        <p className="text-3xl font-bold text-gray-900 dark:text-white leading-tight">
+                          {newQty.toLocaleString()}
+                        </p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                          {qtyDeltaPct >= 0 ? '+' : ''}{qtyDeltaPct}% vs {currQty.toLocaleString()} actual
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Profit change</p>
+                        <p className={`text-3xl font-bold leading-tight ${profitDiff >= 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`}>
                           {profitDiff >= 0 ? '+' : '−'}SAR {Math.abs(profitDiff).toLocaleString()}
-                        </strong>
-                        {' '}{profitDiff >= 0 ? 'more' : 'less'} profit than today.
-                      </li>
-                    </ul>
-                  </div>
+                        </p>
+                        {monthlyProfitDiff !== null && (
+                          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                            ≈ {monthlyProfitDiff >= 0 ? '+' : '−'}SAR {Math.abs(monthlyProfitDiff)} per month
+                          </p>
+                        )}
+                      </div>
+                    </div>
 
-                  <div className={`rounded-lg p-3 text-sm border ${verdictStyles.bg} ${verdictStyles.border} ${verdictStyles.text}`}>
-                    <p className="font-semibold mb-0.5 flex items-center gap-1.5">
-                      <VerdictIcon size={14} />
-                      {verdictStyles.title}
-                    </p>
-                    <p className="text-xs opacity-90">{verdictStyles.body}</p>
-                  </div>
-                </>
-              );
-            })()}
-
-            {/* Compare a few prices side-by-side — always visible once an item is picked */}
-            {sim && (() => {
-              const presets = [
-                { pct: -10, label: 'Small discount' },
-                { pct: 10,  label: 'Small raise' },
-                { pct: 20,  label: 'Bigger raise' },
-              ];
-              return (
-                <div>
-                  <p className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
-                    Compare prices
-                  </p>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {presets.map(({ pct, label }) => {
-                      const sc = sim.scenarios.find((s) => s.priceChangePct === pct);
-                      if (!sc) return null;
-                      const v = verdictFor(sim.current.qtySold, sc.projectedQty, sim.current.profit, sc.newProfit);
-                      const vStyles = {
-                        good:  'bg-success-50 dark:bg-success-900/20 border-success-200 dark:border-success-800 text-success-700 dark:text-success-400',
-                        risky: 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400',
-                        bad:   'bg-danger-50 dark:bg-danger-900/20 border-danger-200 dark:border-danger-800 text-danger-700 dark:text-danger-400',
-                      }[v];
-                      const vConf = {
-                        good:  { Icon: CheckCircle2,  label: 'Good' },
-                        risky: { Icon: AlertTriangle, label: 'Risky' },
-                        bad:   { Icon: ThumbsDown,    label: 'Avoid' },
-                      }[v];
-                      const VIcon = vConf.Icon;
-                      const diff = Math.round(sc.newProfit - sim.current.profit);
+                    {/* Classification transition for the slider-driven scenario */}
+                    {(() => {
+                      const oldKey = sim.current.classification;
+                      const newKey = sim.simulated.newClassification;
+                      const oldC = getClassification(oldKey);
+                      const newC = getClassification(newKey);
+                      const changed = oldKey !== newKey;
                       return (
-                        <div key={pct} className="p-4 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-700">
-                          <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
-                          <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">SAR {Math.round(sc.newPrice)}</p>
-                          <div className="mt-3 space-y-1 text-xs text-gray-600 dark:text-gray-300">
-                            <p>{sc.projectedQty.toLocaleString()} customers</p>
-                            <p className={diff >= 0 ? 'text-success-600 dark:text-success-400 font-medium' : 'text-danger-600 dark:text-danger-400 font-medium'}>
-                              {diff >= 0 ? '+' : '−'}SAR {Math.abs(diff).toLocaleString()} profit
-                            </p>
-                          </div>
-                          <div className={`mt-3 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${vStyles}`}>
-                            <VIcon size={11} />
-                            {vConf.label}
+                        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                          <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+                            Item category at this price
+                          </p>
+                          <div className="flex items-center gap-2 flex-wrap text-sm">
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${oldC.bg} ${oldC.text} border ${oldC.border}`}>
+                              {oldC.emoji} {oldC.label}
+                            </span>
+                            {changed ? (
+                              <>
+                                <span className="text-gray-500 dark:text-gray-400 font-bold">→</span>
+                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${newC.bg} ${newC.text} border ${newC.border}`}>
+                                  {newC.emoji} {newC.label}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="text-xs text-gray-500 dark:text-gray-400">
+                                stays in the same band
+                              </span>
+                            )}
                           </div>
                         </div>
                       );
-                    })}
+                    })()}
                   </div>
-                </div>
+
+                  <div className={`rounded-lg p-3 text-sm border flex items-start gap-2 ${verdictStyles.bg} ${verdictStyles.border} ${verdictStyles.text}`}>
+                    <VerdictIcon size={16} className="flex-shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-semibold">{verdictStyles.title}.</span>{' '}
+                      <span className="opacity-90">{verdictStyles.body}</span>
+                    </div>
+                  </div>
+                </>
               );
             })()}
 

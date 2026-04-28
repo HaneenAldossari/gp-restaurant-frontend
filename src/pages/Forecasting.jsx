@@ -109,14 +109,30 @@ const Forecasting = () => {
     if (scope === 'category') setItem('');
   }, [scope]);
 
-  // Compute effective period in days (capped at 365, the model's hard horizon)
+  // Compute effective period in days. No hard cap — the backend retrains
+  // with a longer horizon on demand if the requested window goes beyond
+  // what's currently cached, so the user can forecast any future date
+  // even if the data is years old.
   const effectiveDays = useMemo(() => {
     if (periodMode === 'custom' && customStart && customEnd) {
       const diff = Math.ceil((new Date(customEnd) - new Date(customStart)) / (1000 * 60 * 60 * 24)) + 1;
-      return Math.max(1, Math.min(365, diff));
+      return Math.max(1, diff);
     }
     return presetDays;
   }, [periodMode, presetDays, customStart, customEnd]);
+
+  // Total distance from the dataset's last actual sale to the END of the
+  // forecast window. This is what determines reliability — Prophet has no
+  // data between data_end and today, so a "next 7 days" forecast against
+  // a 2022 dataset opened in 2026 is really ~1225 days of extrapolation.
+  const horizonFromDataEnd = useMemo(() => {
+    if (!dataRange?.latest) return effectiveDays;
+    const dataEnd = new Date(dataRange.latest + 'T00:00:00');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const daysSince = Math.max(0, Math.ceil((today - dataEnd) / (1000 * 60 * 60 * 24)));
+    return effectiveDays + daysSince;
+  }, [effectiveDays, dataRange]);
 
   // Is the form complete enough to generate?
   const canGenerate = useMemo(() => {
@@ -132,13 +148,16 @@ const Forecasting = () => {
     setError(null);
     setForecast(null);
     try {
+      const dateWindow = periodMode === 'custom' && customStart && customEnd
+        ? { startDate: customStart, endDate: customEnd }
+        : {};
       let data;
       if (scope === 'total') {
-        data = await fetchForecastTotal(effectiveDays);
+        data = await fetchForecastTotal(effectiveDays, dateWindow);
       } else if (scope === 'category') {
-        data = await fetchForecastCategory(category, effectiveDays);
+        data = await fetchForecastCategory(category, effectiveDays, dateWindow);
       } else {
-        data = await fetchForecastItem(item, effectiveDays);
+        data = await fetchForecastItem(item, effectiveDays, dateWindow);
       }
       setForecast(data);
     } catch (e) {
@@ -152,8 +171,16 @@ const Forecasting = () => {
   const chartData = useMemo(() => {
     if (!forecast) return [];
     const rows = forecast.scope === 'item'
-      ? forecast.dailyPredictions.map((p) => ({ date: p.date, predicted: p.predicted_quantity }))
-      : (forecast.chartData || []).map((p) => ({ date: p.date, predicted: p.predicted }));
+      ? forecast.dailyPredictions.map((p) => ({
+          date: p.date,
+          predicted: p.predicted_quantity,
+          revenue: p.predicted_revenue ?? 0,
+        }))
+      : (forecast.chartData || []).map((p) => ({
+          date: p.date,
+          predicted: p.predicted,
+          revenue: p.predicted_revenue ?? 0,
+        }));
     return rows.map((r) => ({
       ...r,
       // short display label like "Nov 3"
@@ -201,17 +228,56 @@ const Forecasting = () => {
     return null;
   }, [forecast]);
 
-  // Weather context — static per-season note, since the model doesn't use weather yet
+  // Weather context — one unified summary covering every season that
+  // appears in the forecast window. Saudi-specific temps and concrete
+  // sales implications. The season regressor already factors into the
+  // Prophet forecast; this panel just surfaces the reasoning.
   const weatherContext = useMemo(() => {
     if (!forecast?.regressorsUsed?.length) return null;
-    const seasons = new Set(forecast.regressorsUsed.map((r) => r.season));
+
+    // Count days per season so we can identify the dominant one
+    const counts = {};
+    for (const r of forecast.regressorsUsed) {
+      counts[r.season] = (counts[r.season] || 0) + 1;
+    }
+    const seasons = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    if (seasons.length === 0) return null;
+
     const info = {
-      Winter: { icon: Snowflake, label: 'Cool & rainy', temps: 'Typical 10–20°C', note: 'Cold drinks sell less; hot drinks peak.' },
-      Spring: { icon: CloudSun, label: 'Mild',          temps: 'Typical 18–28°C', note: 'Balanced demand across the menu.' },
-      Summer: { icon: Sun,      label: 'Hot & dry',     temps: 'Typical 32–45°C', note: 'Cold drinks spike; avoid heavy hot dishes.' },
-      Autumn: { icon: CloudSun, label: 'Warm, cooling', temps: 'Typical 22–32°C', note: 'Transition — mixed demand patterns.' },
+      Winter: { emoji: '❄️', label: 'Cool winter',    temps: '10–20°C',
+                advice: 'Hot drinks peak — push lattes, teas, and hot sweets. Cold drinks typically slow by 20–30%.' },
+      Spring: { emoji: '🌤️', label: 'Warming spring', temps: '22–35°C',
+                advice: 'By April, days already feel summer-like. Cold drinks start rising — expect iced coffee and cold beverages to climb.' },
+      Summer: { emoji: '☀️', label: 'Hot summer',     temps: '35–45°C',
+                advice: 'Cold drinks dominate — iced coffee, smoothies, and cold brews are your best sellers. Reduce hot-dish prep.' },
+      Autumn: { emoji: '🍂', label: 'Cooling autumn', temps: '25–35°C',
+                advice: 'Still warm most days — cold drinks remain strong. Hot drinks begin recovering later in the season.' },
     };
-    return [...seasons].map((s) => ({ season: s, ...(info[s] || {}) })).filter((x) => x.icon);
+
+    const dominantSeason = seasons[0][0];
+    const dominant = info[dominantSeason];
+    if (!dominant) return null;
+
+    if (seasons.length === 1) {
+      return {
+        kind: 'single',
+        emoji: dominant.emoji,
+        headline: `${dominant.label} · ${dominant.temps}`,
+        advice: dominant.advice,
+      };
+    }
+
+    // Multiple seasons — build a single bridging summary
+    const seasonNames = seasons.map(([s]) => s);
+    const seasonSummary = seasonNames
+      .map((s) => `${info[s]?.emoji || ''} ${s}`)
+      .join(' → ');
+    return {
+      kind: 'multi',
+      emoji: dominant.emoji,
+      headline: `Spans ${seasonSummary}`,
+      advice: `Mostly ${dominant.label.toLowerCase()}. ${dominant.advice}`,
+    };
   }, [forecast]);
 
   // Time-period aggregation for item scope
@@ -325,7 +391,11 @@ const Forecasting = () => {
               { days: 90, label: 'Next 3 months', sub: '90 days' },
             ].map((p) => {
               const active = periodMode === 'preset' && presetDays === p.days;
-              const reliable = dataRange?.reliabilityTiers && p.days <= dataRange.reliabilityTiers.reliableDays;
+              // Reliability is measured from the dataset's last actual
+              // sale, not from the requested period — a 7-day forecast
+              // against years-old data is still extrapolation.
+              const horizon = (horizonFromDataEnd - effectiveDays) + p.days;
+              const reliable = dataRange?.reliabilityTiers && horizon <= dataRange.reliabilityTiers.reliableDays;
               return (
                 <button
                   key={p.days}
@@ -386,8 +456,8 @@ const Forecasting = () => {
           </details>
 
           {/* One-line quality hint — only shown when the chosen window is long compared to the data */}
-          {dataRange?.reliabilityTiers && effectiveDays > dataRange.reliabilityTiers.reliableDays && (() => {
-            const isExtrapolation = effectiveDays > dataRange.reliabilityTiers.directionalDays;
+          {dataRange?.reliabilityTiers && horizonFromDataEnd > dataRange.reliabilityTiers.reliableDays && (() => {
+            const isExtrapolation = horizonFromDataEnd > dataRange.reliabilityTiers.directionalDays;
             return (
               <p className={`text-[11px] flex items-center gap-1.5 ${
                 isExtrapolation ? 'text-danger-600 dark:text-danger-400' : 'text-amber-600 dark:text-amber-400'
@@ -401,30 +471,6 @@ const Forecasting = () => {
               </p>
             );
           })()}
-          {periodMode === 'custom' && (
-            <div className="flex flex-wrap gap-2 items-center text-sm">
-              <input
-                type="date"
-                value={customStart}
-                onChange={(e) => setCustomStart(e.target.value)}
-                min={dataRange?.forecastStart}
-                max={dataRange?.forecastEndMax}
-                className="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200"
-              />
-              <ChevronRight size={14} className="text-gray-400" />
-              <input
-                type="date"
-                value={customEnd}
-                onChange={(e) => setCustomEnd(e.target.value)}
-                min={customStart || dataRange?.forecastStart}
-                max={dataRange?.forecastEndMax}
-                className="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200"
-              />
-              <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
-                {customStart && customEnd ? `${effectiveDays} days (max 365)` : 'Pick start and end dates'}
-              </span>
-            </div>
-          )}
 
           {/* Generate button */}
           <button
@@ -464,6 +510,7 @@ const Forecasting = () => {
                 </span>
               </div>
               <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                <span className="text-gray-400 dark:text-gray-500 font-normal mr-0.5" title="Forecast — approximate value">≈</span>
                 SAR {Math.round(forecast.totalPredictedRevenue ?? 0).toLocaleString()}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Expected over {effectiveDays} days</p>
@@ -480,6 +527,7 @@ const Forecasting = () => {
                 </span>
               </div>
               <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                <span className="text-gray-400 dark:text-gray-500 font-normal mr-0.5" title="Forecast — approximate value">≈</span>
                 SAR {Math.round(forecast.totalPredictedProfit ?? 0).toLocaleString()}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">After product costs</p>
@@ -496,6 +544,7 @@ const Forecasting = () => {
                 </span>
               </div>
               <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                <span className="text-gray-400 dark:text-gray-500 font-normal mr-0.5" title="Forecast — approximate value">≈</span>
                 {forecast.totalPredictedQuantity.toLocaleString()}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Items expected to be sold</p>
@@ -538,42 +587,62 @@ const Forecasting = () => {
             </div>
           )}
 
-          {/* Notable events in the window */}
-          {forecast.notableEvents?.length > 0 && (
-            <div className="card dark:bg-gray-800 dark:border-gray-700">
-              <div className="flex items-center gap-2 mb-3">
-                <CalendarDays className="w-5 h-5 text-primary-500" />
-                <h3 className="text-base font-bold text-gray-900 dark:text-white">Special days in this period</h3>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {forecast.notableEvents.slice(0, 12).map((e, i) => {
-                  const eventEmoji = {
-                    'Ramadan':           '🌙',
-                    'Eid al-Fitr':       '🕌',
-                    'Eid al-Adha':       '🕌',
-                    'Saudi National Day': '🇸🇦',
-                    'Weekend':           '🏖️',
-                  }[e.event] || '📅';
-                  const color = e.event === 'Ramadan'           ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
-                              : e.event.startsWith('Eid')       ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-                              : e.event === 'Saudi National Day' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                              : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300';
-                  return (
-                    <span key={i} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${color}`}>
-                      <span>{eventEmoji}</span>
+          {/* Notable events in the window — weekends collapse into one
+              summary badge; rare events (Ramadan, Eid, National Day) are
+              still listed individually with their dates. */}
+          {forecast.notableEvents?.length > 0 && (() => {
+            const weekends = forecast.notableEvents.filter((e) => e.event === 'Weekend');
+            const special = forecast.notableEvents.filter((e) => e.event !== 'Weekend');
+            if (weekends.length === 0 && special.length === 0) return null;
+            const emoji = (ev) => ({
+              'Ramadan':            '🌙',
+              'Eid al-Fitr':        '🕌',
+              'Eid al-Adha':        '🕌',
+              'Saudi National Day': '🇸🇦',
+            }[ev] || '📅');
+            const color = (ev) =>
+              ev === 'Ramadan'            ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+              : ev.startsWith('Eid')      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+              : ev === 'Saudi National Day' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+              : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300';
+
+            return (
+              <div className="card dark:bg-gray-800 dark:border-gray-700">
+                <div className="flex items-center gap-2 mb-3">
+                  <CalendarDays className="w-5 h-5 text-primary-500" />
+                  <h3 className="text-base font-bold text-gray-900 dark:text-white">Special days in this period</h3>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {weekends.length > 0 && (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                      <span>🏖️</span>
+                      <span>
+                        {weekends.length} weekend day{weekends.length === 1 ? '' : 's'}
+                        {' '}(Fri & Sat)
+                      </span>
+                    </span>
+                  )}
+                  {special.slice(0, 12).map((e, i) => (
+                    <span key={i} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${color(e.event)}`}>
+                      <span>{emoji(e.event)}</span>
                       <span>{e.event}</span>
                       <span className="opacity-70">· {new Date(e.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                     </span>
-                  );
-                })}
-                {forecast.notableEvents.length > 12 && (
-                  <span className="text-xs text-gray-500 dark:text-gray-400 px-2 py-1.5">
-                    +{forecast.notableEvents.length - 12} more
-                  </span>
-                )}
+                  ))}
+                  {special.length > 12 && (
+                    <span className="text-xs text-gray-500 dark:text-gray-400 px-2 py-1.5">
+                      +{special.length - 12} more
+                    </span>
+                  )}
+                  {special.length === 0 && (
+                    <span className="text-xs text-gray-500 dark:text-gray-400 self-center ml-1">
+                      No Ramadan, Eid, or national holidays in this window.
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Main chart — simple AreaChart driven by recharts directly */}
           <div className="card dark:bg-gray-800 dark:border-gray-700">
@@ -584,7 +653,10 @@ const Forecasting = () => {
                  `Daily forecast — ${forecast.target}`}
               </h3>
               <span className="text-xs text-gray-500 dark:text-gray-400">
-                {chartData.length} days · {forecast.totalPredictedQuantity.toLocaleString()} units total
+                {chartData.length} days · {forecast.totalPredictedQuantity.toLocaleString()} units
+                {forecast.totalPredictedRevenue != null && (
+                  <> · SAR {Math.round(forecast.totalPredictedRevenue).toLocaleString()}</>
+                )}
               </span>
             </div>
             <div style={{ width: '100%', height: 320 }}>
@@ -600,9 +672,29 @@ const Forecasting = () => {
                   <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6b7280' }} stroke="#e5e7eb" />
                   <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} stroke="#e5e7eb" width={40} />
                   <Tooltip
-                    contentStyle={{ background: 'rgba(255,255,255,0.95)', border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 12 }}
-                    labelFormatter={(label) => `Day: ${label}`}
-                    formatter={(v) => [v.toLocaleString(), 'Predicted quantity']}
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload?.length) return null;
+                      const { predicted = 0, revenue = 0, dayOfWeek } = payload[0].payload || {};
+                      return (
+                        <div className="bg-white dark:bg-gray-800 p-3 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 text-sm">
+                          <p className="font-semibold text-gray-900 dark:text-white mb-1.5">
+                            {dayOfWeek}, {label}
+                          </p>
+                          <div className="space-y-0.5 text-xs">
+                            <div className="flex items-center justify-between gap-4">
+                              <span className="text-gray-500 dark:text-gray-400">Units</span>
+                              <span className="font-semibold text-gray-900 dark:text-white">≈ {predicted.toLocaleString()}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-4">
+                              <span className="text-gray-500 dark:text-gray-400">Revenue</span>
+                              <span className="font-semibold text-gray-900 dark:text-white">
+                                ≈ SAR {revenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }}
                   />
                   <Area type="monotone" dataKey="predicted" stroke="#6366f1" strokeWidth={2} fill="url(#forecastFill)" />
                 </AreaChart>
@@ -729,62 +821,135 @@ const Forecasting = () => {
             );
           })()}
 
-          {/* Weather context (always visible now — it's contextually useful for the manager) */}
-          {weatherContext && weatherContext.length > 0 && (
-            <div className="card dark:bg-gray-800 dark:border-gray-700">
-              <div className="flex items-center gap-2 mb-3">
-                <CloudSun className="w-5 h-5 text-primary-500" />
-                <h3 className="text-base font-semibold text-gray-900 dark:text-white">Weather context</h3>
-              </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-                The forecast window spans {weatherContext.length === 1 ? 'this season' : `${weatherContext.length} seasons`}.
-                Here's what customers typically expect:
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                {weatherContext.map((w) => {
-                  const Icon = w.icon;
-                  return (
-                    <div key={w.season} className="p-3 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600">
-                      <div className="flex items-center gap-2 mb-1">
-                        <Icon className="w-4 h-4 text-primary-500" />
-                        <span className="text-sm font-semibold text-gray-900 dark:text-white">{w.season}</span>
-                      </div>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">{w.label}</p>
-                      <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mt-1">{w.temps}</p>
-                      <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-2">{w.note}</p>
-                    </div>
-                  );
-                })}
-              </div>
-              <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-3 italic">
-                Shown as helpful context — expected weather patterns are already factored into your forecast.
-                Iced drinks, for example, are predicted to sell more during hot months based on past sales.
-              </p>
+          {/* Whole-menu forecast: top 5 individual items + watch-list of
+              slowest 5. Only for the "total" scope — category / item
+              scopes already drill into item-level detail. */}
+          {forecast.scope === 'total' && (forecast.topItems?.length > 0 || forecast.bottomItems?.length > 0) && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {forecast.topItems?.length > 0 && (
+                <div className="card dark:bg-gray-800 dark:border-gray-700">
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-1 flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5 text-success-500" />
+                    Top 5 items forecast
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                    Best-selling individual products expected over the {effectiveDays}-day window.
+                  </p>
+                  <ol className="space-y-2">
+                    {forecast.topItems.map((row, i) => (
+                      <li key={row.name} className="flex items-center gap-3 text-sm">
+                        <span className="w-5 h-5 rounded-full bg-success-100 dark:bg-success-900/30 flex items-center justify-center text-[10px] font-bold text-success-700 dark:text-success-300 flex-shrink-0">
+                          {i + 1}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-gray-900 dark:text-white truncate">{row.name}</p>
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400">{row.category}</p>
+                        </div>
+                        <span className="font-semibold text-gray-900 dark:text-white flex-shrink-0">
+                          {row.totalPredictedQuantity.toLocaleString()}
+                          <span className="text-xs text-gray-400 font-normal"> units</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+
+              {forecast.bottomItems?.length > 0 && (
+                <div className="card dark:bg-gray-800 dark:border-gray-700">
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-1 flex items-center gap-2">
+                    <TrendingDown className="w-5 h-5 text-gray-400" />
+                    Watch-list — slowest 5 items
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                    Lowest predicted demand. Candidates for a promotion, price adjustment, or menu removal.
+                  </p>
+                  <ol className="space-y-2">
+                    {forecast.bottomItems.map((row, i) => (
+                      <li key={row.name} className="flex items-center gap-3 text-sm">
+                        <span className="w-5 h-5 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-[10px] font-bold text-gray-500 dark:text-gray-400 flex-shrink-0">
+                          {i + 1}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-gray-900 dark:text-white truncate">{row.name}</p>
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400">{row.category}</p>
+                        </div>
+                        <span className="font-semibold text-gray-900 dark:text-white flex-shrink-0">
+                          {row.totalPredictedQuantity.toLocaleString()}
+                          <span className="text-xs text-gray-400 font-normal"> units</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
             </div>
           )}
 
-          {/* Time-of-day breakdown (item scope only) */}
-          {timePeriodTotals && (
+          {/* Weather context — a single combined summary of the window's
+              climate and what it means for sales */}
+          {weatherContext && (
             <div className="card dark:bg-gray-800 dark:border-gray-700">
-              <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                <Clock className="w-5 h-5 text-primary-500" />
-                Predicted quantity by time of day
-              </h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {timePeriodTotals.map(({ tp, qty }) => {
-                  const Icon = TIME_PERIOD_ICON[tp] || Sun;
-                  return (
-                    <div key={tp} className="p-4 rounded-lg bg-gray-50 dark:bg-gray-700/50 text-center">
-                      <Icon className="w-5 h-5 mx-auto mb-2 text-primary-500" />
-                      <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">{tp}</p>
-                      <p className="text-xl font-bold text-gray-900 dark:text-white mt-1">
-                        {qty.toLocaleString()}
-                      </p>
-                    </div>
-                  );
-                })}
+              <div className="flex items-start gap-4">
+                <div className="text-4xl leading-none flex-shrink-0" aria-hidden>
+                  {weatherContext.emoji}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-base font-semibold text-gray-900 dark:text-white">
+                    Weather context — {weatherContext.headline}
+                  </h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
+                    {weatherContext.advice}
+                  </p>
+                  <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-2 italic">
+                    Already factored into the forecast — hot-month iced-drink spikes, winter hot-drink peaks, etc. are learned from your past sales.
+                  </p>
+                </div>
               </div>
             </div>
+          )}
+
+          {/* Time-of-day breakdown (item scope only) — only rendered when
+              the uploaded data actually has multiple time-of-day buckets.
+              Otherwise we show an honest note instead of a misleading chart. */}
+          {forecast.scope === 'item' && (
+            forecast.timeOfDayAvailable && timePeriodTotals ? (
+              <div className="card dark:bg-gray-800 dark:border-gray-700">
+                <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-primary-500" />
+                  Predicted quantity by time of day
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {timePeriodTotals.map(({ tp, qty }) => {
+                    const Icon = TIME_PERIOD_ICON[tp] || Sun;
+                    return (
+                      <div key={tp} className="p-4 rounded-lg bg-gray-50 dark:bg-gray-700/50 text-center">
+                        <Icon className="w-5 h-5 mx-auto mb-2 text-primary-500" />
+                        <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">{tp}</p>
+                        <p className="text-xl font-bold text-gray-900 dark:text-white mt-1">
+                          {qty.toLocaleString()}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="card dark:bg-gray-800 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60">
+                <div className="flex items-start gap-3">
+                  <Clock className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+                      Time-of-day breakdown not available for this upload
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Your uploaded file doesn't include order times — all orders land in a single bucket, so a morning / afternoon / evening / night split wouldn't reflect real customer behavior.
+                      Upload a file with a <code className="px-1 rounded bg-gray-200 dark:bg-gray-700">time</code> column alongside <code className="px-1 rounded bg-gray-200 dark:bg-gray-700">date</code> to unlock this view.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )
           )}
 
           {/* Full rankings (visible only when there are more than the top 5 shown above) */}
