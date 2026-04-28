@@ -7,14 +7,21 @@ const HeatmapChart = ({
 }) => {
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-  // Hour labels match the backend shape (strings like "9AM", "12PM"). The
-  // backend emits hours 9–22, so we iterate the same range here.
+  // Hour columns are derived from the backend data — it emits exactly the
+  // hours that fall within the café's operating window (first order to
+  // last order). The hours arrive in numeric order within each day, so
+  // preserving first-occurrence order gives us a correctly sorted axis.
   const hours = useMemo(() => {
-    return Array.from({ length: 14 }, (_, i) => {
-      const h = i + 9;
-      return `${h % 12 || 12}${h < 12 ? 'AM' : 'PM'}`;
-    });
-  }, []);
+    const seen = new Set();
+    const out = [];
+    for (const d of data) {
+      if (d?.hour && !seen.has(d.hour)) {
+        seen.add(d.hour);
+        out.push(d.hour);
+      }
+    }
+    return out;
+  }, [data]);
 
   // Scale color intensity to the actual max in the dataset — the old fixed
   // thresholds (30/50/70/85) were tuned for a different data scale and made

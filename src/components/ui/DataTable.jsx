@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Download } from 'lucide-react';
+import { Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Download, ChevronsUpDown } from 'lucide-react';
 
 const DataTable = ({
   data = [],
@@ -11,10 +11,16 @@ const DataTable = ({
   title = '',
   onExport,
   loading = false,
-  emptyMessage = 'No data available'
+  emptyMessage = 'No data available',
+  defaultSortKey = null,
+  defaultSortDirection = 'desc',
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+  const [sortConfig, setSortConfig] = useState(
+    defaultSortKey
+      ? { key: defaultSortKey, direction: defaultSortDirection }
+      : { key: null, direction: 'asc' }
+  );
   const [currentPage, setCurrentPage] = useState(1);
 
   // Filter data based on search term
@@ -58,10 +64,20 @@ const DataTable = ({
   };
 
   const getSortIcon = (key) => {
-    if (sortConfig.key !== key) return null;
+    if (sortConfig.key !== key) {
+      // Show a faint dual-arrow so users see every column is sortable.
+      return <ChevronsUpDown className="w-3.5 h-3.5 text-gray-300 dark:text-gray-500" />;
+    }
     return sortConfig.direction === 'asc'
-      ? <ChevronUp className="w-4 h-4" />
-      : <ChevronDown className="w-4 h-4" />;
+      ? <ChevronUp className="w-4 h-4 text-primary-600 dark:text-primary-400" />
+      : <ChevronDown className="w-4 h-4 text-primary-600 dark:text-primary-400" />;
+  };
+
+  const getSortTitle = (key) => {
+    if (sortConfig.key !== key) return 'Click to sort ascending';
+    return sortConfig.direction === 'asc'
+      ? 'Sorted low → high · click to reverse'
+      : 'Sorted high → low · click to reverse';
   };
 
   const handleExport = () => {
@@ -136,10 +152,11 @@ const DataTable = ({
                 <th
                   key={col.key}
                   onClick={() => handleSort(col.key)}
-                  className={`table-header dark:bg-gray-700 dark:text-gray-300 ${sortable ? 'cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600' : ''}`}
+                  title={sortable ? getSortTitle(col.key) : undefined}
+                  className={`table-header dark:bg-gray-700 dark:text-gray-300 ${sortable ? 'cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 select-none' : ''}`}
                 >
                   <div className="flex items-center gap-1">
-                    {col.label}
+                    <span>{col.label}</span>
                     {sortable && getSortIcon(col.key)}
                   </div>
                 </th>

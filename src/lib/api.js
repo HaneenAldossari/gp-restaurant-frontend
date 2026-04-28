@@ -77,17 +77,28 @@ export function simulateWhatIf({ target, newPrice, newCost = null }) {
 }
 
 // ── Forecasting ────────────────────────────────────────────────────────
-export function fetchForecastTotal(period = 7) {
-  return request(`/api/forecast/total?period=${period}`);
+// Each accepts optional { startDate, endDate } — when both are provided,
+// the backend slices the pre-trained 365-day forecast to that window so
+// dates like "April 17–22" actually return April predictions (rather than
+// a N-day forecast starting from the end of the training data).
+export function fetchForecastTotal(period = 7, { startDate, endDate } = {}) {
+  const qs = new URLSearchParams({ period: String(period) });
+  if (startDate) qs.set('start_date', startDate);
+  if (endDate)   qs.set('end_date', endDate);
+  return request(`/api/forecast/total?${qs}`);
 }
 
-export function fetchForecastItem(target, period = 7) {
+export function fetchForecastItem(target, period = 7, { startDate, endDate } = {}) {
   const qs = new URLSearchParams({ target, period: String(period) });
+  if (startDate) qs.set('start_date', startDate);
+  if (endDate)   qs.set('end_date', endDate);
   return request(`/api/forecast/item?${qs}`);
 }
 
-export function fetchForecastCategory(target, period = 7) {
+export function fetchForecastCategory(target, period = 7, { startDate, endDate } = {}) {
   const qs = new URLSearchParams({ target, period: String(period) });
+  if (startDate) qs.set('start_date', startDate);
+  if (endDate)   qs.set('end_date', endDate);
   return request(`/api/forecast/category?${qs}`);
 }
 

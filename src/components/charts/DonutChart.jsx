@@ -1,13 +1,13 @@
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 
-const CustomTooltip = ({ active, payload }) => {
+const CustomTooltip = ({ active, payload, valueUnit }) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
     return (
       <div className="bg-white dark:bg-gray-800 p-3 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700">
         <p className="text-sm font-semibold text-gray-900 dark:text-white">{data.name}</p>
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          {data.value?.toLocaleString()} SAR ({data.percentage}%)
+          {data.value?.toLocaleString()} {valueUnit} ({data.percentage}%)
         </p>
       </div>
     );
@@ -37,7 +37,8 @@ const DonutChart = ({
   height = 300,
   innerRadius = 60,
   outerRadius = 100,
-  loading = false
+  loading = false,
+  valueUnit = 'SAR',
 }) => {
   if (loading) {
     return (
@@ -74,7 +75,7 @@ const DonutChart = ({
                 <Cell key={`cell-${index}`} fill={entry.color} />
               ))}
             </Pie>
-            <Tooltip content={<CustomTooltip />} />
+            <Tooltip content={<CustomTooltip valueUnit={valueUnit} />} />
             <Legend content={<CustomLegend />} />
           </PieChart>
         </ResponsiveContainer>
