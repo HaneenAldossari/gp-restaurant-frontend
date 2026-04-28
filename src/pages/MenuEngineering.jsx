@@ -413,6 +413,40 @@ const MenuEngineering = () => {
                       </div>
                     </div>
                   )}
+
+                  {/* Cost-lowering bonus — only shown when the model
+                      thinks the supplier price has plausible room to drop
+                      (skipped for Puzzles where demand, not margin, is
+                      the bottleneck). */}
+                  {op.costLowering && (() => {
+                    const cl = op.costLowering;
+                    const newC = getClassification(cl.newClassification);
+                    return (
+                      <div className="mt-4 pt-4 border-t border-primary-200 dark:border-primary-800/50">
+                        <p className="text-[11px] font-medium text-emerald-700 dark:text-emerald-300 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                          💰 Bonus: lower the unit cost
+                        </p>
+                        <div className="text-sm text-gray-800 dark:text-gray-200">
+                          <span className="font-semibold">SAR {cl.suggestedCost}</span>
+                          <span className="text-gray-500 dark:text-gray-400"> per unit</span>
+                          <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                            ↓ {cl.reductionPct}% off SAR {Math.round(cl.currentCost)}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-2 leading-relaxed">
+                          {cl.rationale}
+                        </p>
+                        {cl.movesClassification && (
+                          <div className="mt-2 flex items-center gap-2 text-xs">
+                            <span className="text-gray-500 dark:text-gray-400">Lands in</span>
+                            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ${newC.bg} ${newC.text} border ${newC.border}`}>
+                              {newC.emoji} {newC.label}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })()}
