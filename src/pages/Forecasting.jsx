@@ -382,13 +382,16 @@ const Forecasting = () => {
             </>
           )}
 
-          {/* Period — three primary options with inline reliability hint */}
+          {/* Period — three primary options with inline reliability hint.
+              Each button shows its actual date range (rolling from
+              tomorrow) so the manager can see at a glance which week /
+              month is being forecast, not just "7 days". */}
           <StepLabel n={scope === 'item' ? 4 : scope === 'category' ? 3 : 2} label="How far ahead?" />
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             {[
-              { days: 7,  label: 'Next week',    sub: '7 days' },
-              { days: 30, label: 'Next month',   sub: '30 days' },
-              { days: 90, label: 'Next 3 months', sub: '90 days' },
+              { days: 7,  label: 'Next week' },
+              { days: 30, label: 'Next month' },
+              { days: 90, label: 'Next 3 months' },
             ].map((p) => {
               const active = periodMode === 'preset' && presetDays === p.days;
               // Reliability is measured from the dataset's last actual
@@ -396,6 +399,24 @@ const Forecasting = () => {
               // against years-old data is still extrapolation.
               const horizon = (horizonFromDataEnd - effectiveDays) + p.days;
               const reliable = dataRange?.reliabilityTiers && horizon <= dataRange.reliabilityTiers.reliableDays;
+
+              // Compute the actual date window each preset will cover.
+              // Anchor on dataRange.forecastStart so the displayed dates
+              // always match what the backend will slice (it's tomorrow,
+              // or the day after data_end if data is in the future).
+              let dateRange = `${p.days} days`;
+              if (dataRange?.forecastStart) {
+                const start = new Date(dataRange.forecastStart + 'T00:00:00');
+                const end = new Date(start);
+                end.setDate(start.getDate() + p.days - 1);
+                const fmt = (d) => d.toLocaleDateString('en-US', {
+                  month: 'short', day: 'numeric',
+                  // Include year on the end date when it crosses a year boundary
+                  year: d.getFullYear() !== start.getFullYear() ? 'numeric' : undefined,
+                });
+                dateRange = `${fmt(start)} – ${fmt(end)}`;
+              }
+
               return (
                 <button
                   key={p.days}
@@ -412,7 +433,8 @@ const Forecasting = () => {
                     </span>
                     {reliable && <span className="text-[10px] text-success-600 dark:text-success-400" title="Reliable forecast">✓</span>}
                   </div>
-                  <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">{p.sub}</p>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">{dateRange}</p>
+                  <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">{p.days} days</p>
                 </button>
               );
             })}
