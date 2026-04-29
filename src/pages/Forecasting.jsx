@@ -617,16 +617,40 @@ const Forecasting = () => {
             const special = forecast.notableEvents.filter((e) => e.event !== 'Weekend');
             if (weekends.length === 0 && special.length === 0) return null;
             const emoji = (ev) => ({
-              'Ramadan':            '🌙',
-              'Eid al-Fitr':        '🕌',
-              'Eid al-Adha':        '🕌',
-              'Saudi National Day': '🇸🇦',
+              'Ramadan':              '🌙',
+              'Eid al-Fitr':          '🕌',
+              'Eid al-Adha':          '🕌',
+              'Saudi National Day':   '🇸🇦',
+              'Payday':               '💰',
+              'Post-payday spending': '🛍️',
             }[ev] || '📅');
             const color = (ev) =>
-              ev === 'Ramadan'            ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
-              : ev.startsWith('Eid')      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+              ev === 'Ramadan'              ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+              : ev.startsWith('Eid')        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
               : ev === 'Saudi National Day' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-              : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300';
+              : ev === 'Payday'             ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+              : 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400';
+
+            // Group consecutive same-event days into ranges. Without
+            // this, a 9-day "Post-payday spending" window renders as
+            // 9 identical pills cluttering the panel.
+            const sortedSpecial = [...special].sort((a, b) => a.date.localeCompare(b.date));
+            const groups = [];
+            for (const e of sortedSpecial) {
+              const last = groups[groups.length - 1];
+              const eDate = new Date(e.date + 'T00:00:00');
+              if (last && last.event === e.event) {
+                const lastEnd = new Date(last.endDate + 'T00:00:00');
+                const dayDiff = Math.round((eDate - lastEnd) / 86400000);
+                if (dayDiff === 1) {
+                  last.endDate = e.date;
+                  last.count += 1;
+                  continue;
+                }
+              }
+              groups.push({ event: e.event, startDate: e.date, endDate: e.date, count: 1 });
+            }
+            const fmtDay = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
             return (
               <div className="card dark:bg-gray-800 dark:border-gray-700">
@@ -644,21 +668,21 @@ const Forecasting = () => {
                       </span>
                     </span>
                   )}
-                  {special.slice(0, 12).map((e, i) => (
-                    <span key={i} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${color(e.event)}`}>
-                      <span>{emoji(e.event)}</span>
-                      <span>{e.event}</span>
-                      <span className="opacity-70">· {new Date(e.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                  {groups.map((g, i) => (
+                    <span key={i} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${color(g.event)}`}>
+                      <span>{emoji(g.event)}</span>
+                      <span>{g.event}</span>
+                      <span className="opacity-70">
+                        {' · '}
+                        {g.count === 1
+                          ? fmtDay(g.startDate)
+                          : `${fmtDay(g.startDate)} – ${fmtDay(g.endDate)} (${g.count} days)`}
+                      </span>
                     </span>
                   ))}
-                  {special.length > 12 && (
-                    <span className="text-xs text-gray-500 dark:text-gray-400 px-2 py-1.5">
-                      +{special.length - 12} more
-                    </span>
-                  )}
-                  {special.length === 0 && (
+                  {groups.length === 0 && (
                     <span className="text-xs text-gray-500 dark:text-gray-400 self-center ml-1">
-                      No Ramadan, Eid, or national holidays in this window.
+                      No Ramadan, Eid, payday, or national holidays in this window.
                     </span>
                   )}
                 </div>
