@@ -381,36 +381,30 @@ const MenuEngineering = () => {
                     </>
                   )}
 
-                  {/* Classification transition — what category does this item move to? */}
-                  {fromClass && toClass && (
-                    <div className="mt-4 pt-4 border-t border-primary-200 dark:border-primary-800/50">
-                      <p className="text-[11px] font-medium text-primary-700 dark:text-primary-300 uppercase tracking-wide mb-2">
-                        Item category
-                      </p>
-                      <div className="flex items-center gap-2 flex-wrap text-sm">
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${fromClass.bg} ${fromClass.text} border ${fromClass.border}`}>
-                          {fromClass.emoji} {fromClass.label}
-                        </span>
-                        {transitionChanged ? (
-                          <>
-                            <span className="text-primary-600 dark:text-primary-400 font-bold">→</span>
-                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${toClass.bg} ${toClass.text} border ${toClass.border}`}>
-                              {toClass.emoji} {toClass.label}
-                            </span>
-                            <span className="text-xs text-primary-700 dark:text-primary-300 ml-1">
-                              {direction === 'raise' && op.newClassification === 'Star' && 'profit lift moves it into the Hero band'}
-                              {direction === 'lower' && op.newClassification === 'Star' && 'higher demand pushes it into the Hero band'}
-                              {direction === 'lower' && op.newClassification === 'Plowhorse' && 'discount drives volume up at the cost of margin'}
-                              {direction === 'raise' && op.newClassification === 'Puzzle' && 'higher margin offsets the smaller crowd'}
-                              {op.newClassification === 'Dog' && 'watch it carefully — risk of slipping further'}
-                            </span>
-                          </>
-                        ) : (
-                          <span className="text-xs text-gray-600 dark:text-gray-400">
-                            stays in the same band — change is too small to reshape the item's role on the menu
-                          </span>
-                        )}
-                      </div>
+                  {/* Classification transition — only render when the band
+                      actually changes. Showing a redundant "stays in the
+                      same band" pill alongside the same badge in the item
+                      header is just visual noise. */}
+                  {fromClass && toClass && transitionChanged && (
+                    <div className="mt-3 pt-3 border-t border-primary-200 dark:border-primary-800/50 flex items-center gap-2 flex-wrap text-sm">
+                      <span className="text-[11px] font-medium text-primary-700 dark:text-primary-300 uppercase tracking-wide mr-1">
+                        Moves to
+                      </span>
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${fromClass.bg} ${fromClass.text} border ${fromClass.border}`}>
+                        {fromClass.emoji} {fromClass.label}
+                      </span>
+                      <span className="text-primary-600 dark:text-primary-400 font-bold">→</span>
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${toClass.bg} ${toClass.text} border ${toClass.border}`}>
+                        {toClass.emoji} {toClass.label}
+                      </span>
+                      <span className="text-xs text-primary-700 dark:text-primary-300 ml-1">
+                        {direction === 'raise' && op.newClassification === 'Star' && 'profit lift pushes it into the Hero band'}
+                        {direction === 'lower' && op.newClassification === 'Star' && 'demand picks up enough to reach Hero status'}
+                        {direction === 'lower' && op.newClassification === 'Plowhorse' && 'volume rises but margin tightens'}
+                        {direction === 'raise' && op.newClassification === 'Puzzle' && 'margin grows, but at fewer customers'}
+                        {direction === 'raise' && op.newClassification === 'Dog' && 'demand collapses faster than margin grows'}
+                        {op.newClassification === 'Dog' && direction !== 'raise' && 'watch it carefully — risk of slipping further'}
+                      </span>
                     </div>
                   )}
 
@@ -535,12 +529,46 @@ const MenuEngineering = () => {
                 ? Math.round((sim.simulated.newProfit - sim.current.profit) / historyDays * 30)
                 : null;
               const qtyDeltaPct = currQty > 0 ? Math.round((newQty - currQty) / currQty * 100) : 0;
+              const oldKey = sim.current.classification;
+              const newKey = sim.simulated.newClassification;
+              const oldC = getClassification(oldKey);
+              const newC = getClassification(newKey);
+              const classChanged = oldKey !== newKey;
               return (
                 <>
                   <div className="p-5 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-                    <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-4">
-                      At SAR {Math.round(targetItem.price + priceDelta)} (vs actual)
-                    </p>
+                    {/* Header: price on the left, classification at this
+                        price on the right. The badge collapses to a single
+                        pill when nothing changes; expands to "From → To"
+                        when the band shifts. No redundant uppercase label. */}
+                    <div className="flex items-start justify-between flex-wrap gap-3 mb-4">
+                      <div>
+                        <p className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                          If you set the price to
+                        </p>
+                        <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                          SAR {Math.round(targetItem.price + priceDelta)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {classChanged ? (
+                          <>
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${oldC.bg} ${oldC.text} border ${oldC.border}`}>
+                              {oldC.emoji} {oldC.label}
+                            </span>
+                            <span className="text-gray-400 font-bold">→</span>
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${newC.bg} ${newC.text} border ${newC.border}`}>
+                              {newC.emoji} {newC.label}
+                            </span>
+                          </>
+                        ) : (
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${oldC.bg} ${oldC.text} border ${oldC.border}`}
+                                title="Classification unchanged">
+                            {oldC.emoji} {oldC.label}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                       <div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Units sold</p>
@@ -563,39 +591,6 @@ const MenuEngineering = () => {
                         )}
                       </div>
                     </div>
-
-                    {/* Classification transition for the slider-driven scenario */}
-                    {(() => {
-                      const oldKey = sim.current.classification;
-                      const newKey = sim.simulated.newClassification;
-                      const oldC = getClassification(oldKey);
-                      const newC = getClassification(newKey);
-                      const changed = oldKey !== newKey;
-                      return (
-                        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                          <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
-                            Item category at this price
-                          </p>
-                          <div className="flex items-center gap-2 flex-wrap text-sm">
-                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${oldC.bg} ${oldC.text} border ${oldC.border}`}>
-                              {oldC.emoji} {oldC.label}
-                            </span>
-                            {changed ? (
-                              <>
-                                <span className="text-gray-500 dark:text-gray-400 font-bold">→</span>
-                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${newC.bg} ${newC.text} border ${newC.border}`}>
-                                  {newC.emoji} {newC.label}
-                                </span>
-                              </>
-                            ) : (
-                              <span className="text-xs text-gray-500 dark:text-gray-400">
-                                stays in the same band
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })()}
                   </div>
 
                   <div className={`rounded-lg p-3 text-sm border flex items-start gap-2 ${verdictStyles.bg} ${verdictStyles.border} ${verdictStyles.text}`}>
