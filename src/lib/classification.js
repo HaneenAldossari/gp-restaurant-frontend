@@ -1,16 +1,16 @@
-// Maps the Boston Matrix classifications (Star / Plowhorse / Puzzle / Dog)
-// from the backend into action-based UX labels.
-//
-// UX principle (decided with the team): a non-MBA restaurant owner should
-// never have to translate "Puzzle" or "Dog" in their head. The primary
-// label is an action; the academic term only appears in a tooltip.
+// Boston Matrix classifications (Star / Plowhorse / Puzzle / Dog)
+// from the backend. Earlier versions wrapped these in friendlier labels
+// ("Hero item", "Underperformer"), but the team decided the academic
+// names are clearer for the thesis context and avoid the awkward
+// situation where the dashboard says "Hero item" while the supervisor
+// asks "what's a Star?". Tooltips still spell out the meaning.
 
 export const CLASSIFICATION_MAP = {
   Star: {
-    label: 'Hero item',
+    label: 'Star',
     emoji: '⭐',
     advice: 'Keep featuring it prominently — this is a winner.',
-    tooltip: 'Boston Matrix: Star — high popularity and high profit margin.',
+    tooltip: 'Star — high popularity and high profit margin.',
     color: 'emerald',
     // Tailwind classes for each visual layer
     bg: 'bg-emerald-50 dark:bg-emerald-900/20',
@@ -19,10 +19,10 @@ export const CLASSIFICATION_MAP = {
     dot: '#10b981',
   },
   Plowhorse: {
-    label: 'Popular, tight margin',
-    emoji: '🔥',
-    advice: 'High demand but low profit — consider a small price increase.',
-    tooltip: 'Boston Matrix: Plowhorse — high popularity but low profit margin.',
+    label: 'Plowhorse',
+    emoji: '🐎',
+    advice: 'High demand but low profit — try a small price increase, or negotiate the unit cost down.',
+    tooltip: 'Plowhorse — high popularity but low profit margin.',
     color: 'amber',
     bg: 'bg-amber-50 dark:bg-amber-900/20',
     border: 'border-amber-200 dark:border-amber-800',
@@ -30,10 +30,10 @@ export const CLASSIFICATION_MAP = {
     dot: '#f59e0b',
   },
   Puzzle: {
-    label: 'Hidden gem',
+    label: 'Puzzle',
     emoji: '🧩',
     advice: 'Great profit, low sales — feature it more in promotions.',
-    tooltip: 'Boston Matrix: Puzzle — low popularity but high profit margin.',
+    tooltip: 'Puzzle — low popularity but high profit margin.',
     color: 'sky',
     bg: 'bg-sky-50 dark:bg-sky-900/20',
     border: 'border-sky-200 dark:border-sky-800',
@@ -41,10 +41,10 @@ export const CLASSIFICATION_MAP = {
     dot: '#0ea5e9',
   },
   Dog: {
-    label: 'Underperformer',
-    emoji: '⚠️',
+    label: 'Dog',
+    emoji: '🐕',
     advice: 'Low on both sales and profit — rework the recipe or remove it.',
-    tooltip: 'Boston Matrix: Dog — low popularity and low profit margin.',
+    tooltip: 'Dog — low popularity and low profit margin.',
     color: 'rose',
     bg: 'bg-rose-50 dark:bg-rose-900/20',
     border: 'border-rose-200 dark:border-rose-800',
