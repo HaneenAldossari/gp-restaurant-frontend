@@ -52,7 +52,37 @@ async function request(path, { method = 'GET', body = null } = {}) {
     init.headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
   }
-  const res = await fetch(`${API_BASE}${path}`, init);
+
+  // Forecast endpoints can take up to ~60s on the FIRST call per
+  // workspace because Prophet has to train all 129 product models
+  // from scratch (Render free tier, no warm pickle yet). Subsequent
+  // calls hit the disk cache and respond in <100ms. Without this
+  // longer timeout the browser would surface "Failed to fetch" while
+  // the server is still busy and successfully producing the answer.
+  const isSlowEndpoint = path.startsWith('/api/forecast');
+  const timeoutMs = isSlowEndpoint ? 90000 : 25000;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  init.signal = ctl.signal;
+
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, init);
+  } catch (e) {
+    clearTimeout(timer);
+    if (e.name === 'AbortError') {
+      const msg = isSlowEndpoint
+        ? 'The forecast is taking longer than usual — the free-tier server is warming up. Try again in 30 seconds.'
+        : 'The server is waking up — try again in a moment.';
+      throw new Error(msg);
+    }
+    // Connection-level failure (server down, DNS, CORS, etc.).
+    // Re-throw with a friendlier message — the default "Failed to
+    // fetch" is too vague to act on.
+    throw new Error('Could not reach the server. It may still be starting up after a redeploy — try again in a minute.');
+  }
+  clearTimeout(timer);
+
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const detail = data?.detail;
