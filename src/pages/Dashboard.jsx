@@ -24,6 +24,10 @@ import DataTable from '../components/ui/DataTable';
 import Badge from '../components/ui/Badge';
 import { fetchDashboard, fetchDataRange } from '../lib/api';
 import EmptyState from '../components/ui/EmptyState';
+import ExportMenu from '../components/ui/ExportMenu';
+import SpecialDaysImpact from '../components/dashboard/SpecialDaysImpact';
+import { fmtSar, fmtNum, fmtPct } from '../lib/reports';
+import { getEventsInRange, describeDate } from '../lib/saudiCalendar';
 import {
   BarChart as RechartsBarChart,
   Bar as RechartsBar,
@@ -308,10 +312,180 @@ const Dashboard = () => {
 
   const kpis = data?.kpis;
 
+  // Build a polished report from the currently displayed data. Captures
+  // the active category + date filters so the export reflects exactly
+  // what the user is looking at (not "all of forever").
+  const buildDashboardReport = () => {
+    if (!data) return null;
+    const k = data.kpis || {};
+    const fmtDate = (iso) => iso
+      ? new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      : '—';
+
+    const meta = [
+      { label: 'Category', value: selectedCategory === 'All' ? 'All categories' : selectedCategory },
+      { label: 'Date range', value: dateFilterActive
+        ? `${fmtDate(startDate)} → ${fmtDate(endDate)}`
+        : (dataRange?.hasData ? `${fmtDate(dataRange.earliest)} → ${fmtDate(dataRange.latest)}` : '—') },
+      { label: 'Days covered', value: fmtNum(dataRange?.totalDays || (data.dailyRevenue?.length || 0)) },
+    ];
+
+    const sections = [];
+
+    // KPI summary
+    sections.push({
+      name: 'Headline KPIs',
+      kind: 'kv',
+      rows: [
+        ['Total revenue', fmtSar(k.totalRevenue)],
+        ['Total orders', fmtNum(k.totalOrders)],
+        ['Average order value', fmtSar(k.avgOrderValue)],
+        ['Average daily revenue', fmtSar(k.avgDailyRevenue)],
+        ['Best seller', `${k.bestSeller?.name || '—'} (${fmtNum(k.bestSeller?.qty)} units)`],
+        ['Slowest seller', `${k.worstSeller?.name || '—'} (${fmtNum(k.worstSeller?.qty)} units)`],
+        ['Busiest day of week', `${k.busiestDay?.name || '—'} (avg ${fmtSar(k.busiestDay?.avgRevenue)})`],
+        ['Revenue Δ (last 30d vs prev)', fmtPct(k.revenueChange)],
+        ['Orders Δ (last 30d vs prev)', fmtPct(k.ordersChange)],
+        ['AOV Δ (last 30d vs prev)', fmtPct(k.avgOrderChange)],
+      ],
+    });
+
+    // Top by revenue (capped at 15 for the report)
+    if (productsByRevenue.length) {
+      const top = productsByRevenue.slice(0, 15);
+      const total = top.reduce((s, p) => s + (p.revenue || 0), 0);
+      sections.push({
+        name: 'Top products by revenue',
+        kind: 'table',
+        columns: ['#', 'Product', 'Category', 'Revenue (SAR)'],
+        rows: top.map((p, i) => [i + 1, p.name, p.category || '—', fmtNum(p.revenue)]),
+        totals: ['', 'Subtotal', '', fmtNum(total)],
+      });
+    }
+
+    if (productsByQty.length) {
+      const top = productsByQty.slice(0, 15);
+      const total = top.reduce((s, p) => s + (p.sales || 0), 0);
+      sections.push({
+        name: 'Top products by units sold',
+        kind: 'table',
+        columns: ['#', 'Product', 'Category', 'Units'],
+        rows: top.map((p, i) => [i + 1, p.name, p.category || '—', fmtNum(p.sales)]),
+        totals: ['', 'Subtotal', '', fmtNum(total)],
+      });
+    }
+
+    if ((data.salesByCategory || []).length) {
+      const rows = data.salesByCategory;
+      const total = rows.reduce((s, c) => s + (c.value || 0), 0);
+      sections.push({
+        name: 'Revenue by category',
+        kind: 'table',
+        columns: ['Category', 'Revenue (SAR)', 'Share'],
+        rows: rows.map((c) => [
+          c.name,
+          fmtNum(c.value),
+          total > 0 ? fmtPct((c.value / total) * 100) : '—',
+        ]),
+        totals: ['Total', fmtNum(total), '100.0%'],
+      });
+    }
+
+    if (ordersByDayOfWeek.length) {
+      sections.push({
+        name: 'Day-of-week pattern',
+        kind: 'table',
+        columns: ['Day', 'Orders', 'Units', 'Revenue (SAR)'],
+        rows: ordersByDayOfWeek.map((d) => [d.name, fmtNum(d.orders), fmtNum(d.units), fmtNum(d.revenue)]),
+      });
+    }
+
+    // Sales-around-special-days analysis — captioned peak day +
+    // per-occasion lift vs baseline. Same logic as the on-screen
+    // SpecialDaysImpact panel, distilled into a manager-readable
+    // table for the export.
+    if ((data.dailyRevenue || []).length) {
+      const drRows = data.dailyRevenue;
+      const first = dateFilterActive ? startDate : (dataRange?.earliest || drRows[0].date);
+      const last = dateFilterActive ? endDate : (dataRange?.latest || drRows[drRows.length - 1].date);
+      const events = getEventsInRange(first, last);
+
+      const revByDate = new Map();
+      for (const r of drRows) revByDate.set(r.date, r.revenue || 0);
+      const eventDates = new Set();
+      for (const ev of events) for (const d of ev.daysInWindow) eventDates.add(d.date);
+      const baselineRevs = drRows.filter((r) => !eventDates.has(r.date)).map((r) => r.revenue || 0);
+      const baselineAvg = baselineRevs.length
+        ? baselineRevs.reduce((s, x) => s + x, 0) / baselineRevs.length : null;
+
+      const peak = drRows.reduce((a, b) => ((b.revenue || 0) > (a.revenue || 0) ? b : a));
+      const peakCtx = describeDate(peak.date);
+      sections.push({
+        name: 'Peak day in window',
+        kind: 'kv',
+        rows: [
+          ['Date', new Date(peak.date + 'T00:00:00').toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' })],
+          ['Revenue', fmtSar(peak.revenue)],
+          ['Why this day', peakCtx
+            ? `${peakCtx.phaseLabel}${peakCtx.event ? ' — ' + peakCtx.event.blurb : ''}`
+            : 'No major occasion fell on this date — likely weekend or payday-week traffic.'],
+        ],
+      });
+
+      if (events.length) {
+        sections.push({
+          name: 'Sales lift around special days',
+          kind: 'table',
+          columns: ['Occasion', 'Dates', 'Days', 'Avg revenue (SAR)', 'vs normal day'],
+          rows: events.map((ev) => {
+            const days = ev.daysInWindow.map((d) => revByDate.get(d.date)).filter((v) => v != null);
+            if (!days.length) return null;
+            const avg = days.reduce((s, v) => s + v, 0) / days.length;
+            const lift = baselineAvg ? ((avg - baselineAvg) / baselineAvg) * 100 : 0;
+            const dateLabel = ev.start === ev.end
+              ? new Date(ev.start + 'T00:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' })
+              : `${new Date(ev.start + 'T00:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' })} – ${new Date(ev.end + 'T00:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' })}`;
+            return [
+              `${ev.emoji} ${ev.name}`,
+              dateLabel,
+              fmtNum(days.length),
+              fmtNum(avg),
+              `${lift >= 0 ? '+' : ''}${lift.toFixed(1)}%`,
+            ];
+          }).filter(Boolean),
+          totals: baselineAvg != null
+            ? ['Normal day baseline', '—', '—', fmtNum(baselineAvg), '—']
+            : null,
+        });
+      }
+    }
+
+    if ((data.dailyRevenue || []).length) {
+      const rows = data.dailyRevenue;
+      const totalRev = rows.reduce((s, r) => s + (r.revenue || 0), 0);
+      const totalOrd = rows.reduce((s, r) => s + (r.orders || 0), 0);
+      sections.push({
+        name: 'Daily revenue',
+        kind: 'table',
+        columns: ['Date', 'Revenue (SAR)', 'Orders'],
+        rows: rows.map((r) => [r.date, fmtNum(r.revenue), fmtNum(r.orders)]),
+        totals: ['Total', fmtNum(totalRev), fmtNum(totalOrd)],
+      });
+    }
+
+    return {
+      title: 'Sales Dashboard Report',
+      subtitle: 'Performance overview',
+      meta,
+      sections,
+    };
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Live data indicator + dataset range */}
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Live data indicator + dataset range + export */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
           <Database size={12} />
@@ -327,6 +501,12 @@ const Dashboard = () => {
             <span className="text-primary-400">· {dataRange.totalDays.toLocaleString()} days</span>
           </div>
         )}
+        </div>
+        <ExportMenu
+          buildReport={buildDashboardReport}
+          baseFilename="dashboard-report"
+          disabled={loading || !data}
+        />
       </div>
 
       {/* Filters — category + date range (bounded to the dataset) */}
@@ -507,6 +687,17 @@ const Dashboard = () => {
         loading={loading}
         height={400}
       />
+
+      {/* Sales-around-special-days analysis. Captions the peak day with
+          its Saudi occasion (e.g. "July 6 → 3 days before Eid al-Adha")
+          and breaks down lift/drop per occasion in the active window. */}
+      {!loading && data?.dailyRevenue?.length > 0 && (
+        <SpecialDaysImpact
+          dailyRevenue={data.dailyRevenue}
+          startDate={dateFilterActive ? startDate : (dataRange?.earliest)}
+          endDate={dateFilterActive ? endDate : (dataRange?.latest)}
+        />
+      )}
 
       {/* Charts row — only when viewing all categories; with a single
           category selected these two charts become trivially one-bar. */}

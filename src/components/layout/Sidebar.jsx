@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   User,
+  Upload as UploadIcon,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -18,32 +19,70 @@ const Sidebar = ({ isOpen, onToggle }) => {
   const { user, logout, hasAccess } = useAuth();
   const { isDarkMode } = useTheme();
 
+  // Sidebar visibility logic now considers BOTH role and (for sub-users)
+  // permission level. The previous role-only check hid Forecasting and
+  // Menu Insights from sub-users entirely because their normalised role
+  // is "Cashier", and those items only allowed Admin/Manager.
+  //
+  //   Manager / Admin           → Dashboard, Forecasting, Menu Insights, Settings
+  //                                (Upload lives inside Settings → Upload Data tab)
+  //   Sub-user · view only      → Dashboard, Forecasting, Menu Insights
+  //   Sub-user · upload only    → Upload Data only (no analytics, no Settings)
+  //   Sub-user · view + upload  → Dashboard, Forecasting, Menu Insights, Upload Data
+  //
+  // `subUserPerm` lists which sub-user permissions can see the item.
+  // An empty/missing array means the item is hidden from all sub-users.
+  const isSubUser = user?.role === 'Cashier';
   const navItems = [
     {
       path: '/dashboard',
       icon: LayoutDashboard,
       label: 'Dashboard',
-      roles: ['Admin', 'Manager', 'Cashier']
+      roles: ['Admin', 'Manager'],
+      subUserPerm: ['read_only', 'read_write'],
     },
     {
       path: '/forecasting',
       icon: TrendingUp,
       label: 'Forecasting',
-      roles: ['Admin', 'Manager']
+      roles: ['Admin', 'Manager'],
+      subUserPerm: ['read_only', 'read_write'],
     },
     {
       path: '/menu-engineering',
       icon: Utensils,
       label: 'Menu Insights',
-      roles: ['Admin', 'Manager']
+      roles: ['Admin', 'Manager'],
+      subUserPerm: ['read_only', 'read_write'],
     },
     {
+      // Upload lives in the main sidebar ONLY for sub-users that have
+      // a write permission — managers still access it via Settings.
+      path: '/upload',
+      icon: UploadIcon,
+      label: 'Upload Data',
+      roles: [],  // hidden for managers/admins (they use Settings → Upload)
+      subUserPerm: ['write_only', 'read_write'],
+    },
+    {
+      // Settings open to managers + read-capable sub-users. Write-only
+      // sub-users (Cashier permission) don't get Settings — their
+      // workspace is just the Upload Data page.
       path: '/settings',
       icon: Settings,
       label: 'Settings',
-      roles: ['Admin']
-    }
+      roles: ['Admin', 'Manager'],
+      subUserPerm: ['read_only', 'read_write'],
+    },
   ];
+
+  const isVisible = (item) => {
+    if (!user) return false;
+    if (isSubUser) {
+      return (item.subUserPerm || []).includes(user.permission);
+    }
+    return (item.roles || []).includes(user.role);
+  };
 
   const handleLogout = () => {
     logout();
@@ -93,22 +132,35 @@ const Sidebar = ({ isOpen, onToggle }) => {
             {isOpen && (
               <div className="flex flex-col">
                 <span className="text-sm font-medium text-gray-900 dark:text-white">{user?.name || 'Guest'}</span>
-                <span className="text-xs text-gray-500 dark:text-gray-400">{user?.role || 'Unknown'}</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {/* Show the sub-user's permission (Viewer / Cashier /
+                      Full access) instead of the generic "Cashier" role
+                      label, so the user can see what each sub-user is
+                      allowed to do at a glance. */}
+                  {user?.role === 'Cashier'
+                    ? ({ read_only: 'Viewer', write_only: 'Cashier', read_write: 'Full access' }[user?.permission] || 'Sub-user')
+                    : (user?.role || 'Unknown')}
+                </span>
               </div>
             )}
           </div>
         </div>
 
-        {/* Workspace switcher (testing-only, will be replaced by real auth) */}
-        <div className="px-3 py-3 border-b border-gray-200 dark:border-gray-700">
-          <WorkspaceSwitcher compact={!isOpen} />
-        </div>
+        {/* Workspace switcher — only shown when there is NO logged-in
+            user. With real auth in place each user already sees their
+            own workspace; the switcher is now a fallback for the
+            demo/testing flow that pre-dates login. */}
+        {!user && (
+          <div className="px-3 py-3 border-b border-gray-200 dark:border-gray-700">
+            <WorkspaceSwitcher compact={!isOpen} />
+          </div>
+        )}
 
         {/* Navigation */}
         <nav className="flex-1 px-3 py-4 overflow-y-auto scrollbar-thin">
           <ul className="space-y-1">
             {navItems.map((item) => {
-              if (!hasAccess(item.roles)) return null;
+              if (!isVisible(item)) return null;
 
               return (
                 <li key={item.path}>

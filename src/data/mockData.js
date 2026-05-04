@@ -280,13 +280,6 @@ export const users = [
   { id: 3, username: 'cashier', password: 'cashier123', role: 'Cashier', name: 'Fatima Hassan', avatar: null }
 ];
 
-// Notifications
-export const notifications = [
-  { id: 1, type: 'alert', message: 'Low stock alert: Arabic Coffee beans running low', time: '10 minutes ago', read: false },
-  { id: 2, type: 'info', message: 'Sales target achieved for today!', time: '1 hour ago', read: false },
-  { id: 3, type: 'warning', message: 'Veggie Wrap sales declining - consider promotion', time: '3 hours ago', read: true }
-];
-
 // Strategic Recommendations
 export const recommendations = {
   stars: [

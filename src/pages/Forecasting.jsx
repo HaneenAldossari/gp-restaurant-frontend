@@ -44,6 +44,8 @@ import {
   fetchDataRange,
 } from '../lib/api';
 import EmptyState from '../components/ui/EmptyState';
+import ExportMenu from '../components/ui/ExportMenu';
+import { fmtSar, fmtNum } from '../lib/reports';
 
 const TIME_PERIOD_ICON = {
   morning: Coffee,
@@ -280,14 +282,196 @@ const Forecasting = () => {
     };
   }, [forecast]);
 
-  // Time-period aggregation for item scope
+  // Time-period aggregation for item scope. Prefer the backend's
+  // pre-aggregated `timePeriodTotals` (rounded once at float-sum
+  // level so low-volume items keep their non-zero buckets); fall back
+  // to summing the per-day breakdown for older payloads.
   const timePeriodTotals = useMemo(() => {
-    if (forecast?.scope !== 'item' || !forecast.timePeriodBreakdown) return null;
+    if (forecast?.scope !== 'item') return null;
+    if (forecast.timePeriodTotals?.length) {
+      return forecast.timePeriodTotals.map((r) => ({
+        tp: r.time_period, qty: r.predicted_quantity,
+      }));
+    }
+    if (!forecast.timePeriodBreakdown) return null;
     const buckets = { morning: 0, Afternoon: 0, Evening: 0, night: 0 };
     for (const row of forecast.timePeriodBreakdown) buckets[row.time_period] = (buckets[row.time_period] || 0) + row.predicted_quantity;
     return Object.entries(buckets).map(([tp, qty]) => ({ tp, qty }));
   }, [forecast]);
 
+  // Manager-focused forecast report. We deliberately leave OUT the
+  // 30+-row daily prediction table — a manager doesn't act on
+  // "Tuesday 184 units, Wednesday 197 units." They act on:
+  //   "Eid is in this window — staff up Apr 28–May 1"
+  //   "Lattes will be your top driver — make sure stock holds"
+  //   "Friday is the peak day — schedule extra staff"
+  // The CSV/PDF surface those decisions, not the raw model output.
+  const buildForecastReport = () => {
+    if (!forecast) return null;
+    const fmtDay = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('en-US', {
+      weekday: 'short', month: 'short', day: 'numeric',
+    });
+
+    const scopeLabel =
+      forecast.scope === 'item'     ? `Item: ${forecast.target}` :
+      forecast.scope === 'category' ? `Category: ${forecast.target}` :
+                                      'Whole menu';
+
+    const meta = [
+      { label: 'Scope', value: scopeLabel },
+      { label: 'Forecast window', value: chartData.length
+        ? `${fmtDay(chartData[0].date)} → ${fmtDay(chartData[chartData.length - 1].date)} (${chartData.length} days)`
+        : `${effectiveDays} days` },
+      { label: 'Trained on', value: dataRange?.hasData
+        ? `${fmtDate(dataRange.earliest)} → ${fmtDate(dataRange.latest)} (${dataRange.totalDays} days of history)`
+        : '—' },
+      ...(weatherContext ? [{ label: 'Weather context', value: weatherContext.headline }] : []),
+    ];
+
+    const sections = [];
+
+    // 1. Executive summary — what you tell the owner in one line
+    sections.push({
+      name: 'Executive summary',
+      kind: 'kv',
+      rows: [
+        ['Expected revenue', fmtSar(forecast.totalPredictedRevenue)],
+        ['Expected profit (after product cost)', fmtSar(forecast.totalPredictedProfit)],
+        ['Expected units sold', fmtNum(forecast.totalPredictedQuantity)],
+        ['Average per day', `${fmtNum(avgDaily)} units`],
+        ...(peakDay ? [['Peak day', `${fmtDay(peakDay.date)} (${fmtNum(peakDay.predicted)} units) — staff accordingly`]] : []),
+        ...(slowestDay ? [['Slowest day', `${fmtDay(slowestDay.date)} (${fmtNum(slowestDay.predicted)} units)`]] : []),
+        ...(bestSeller ? [['Top performer', `${bestSeller.label} (${fmtNum(bestSeller.qty)} units)`]] : []),
+      ],
+    });
+
+    // 2. What to do — the model's own manager tips
+    if (forecast.managerTips?.length) {
+      sections.push({
+        name: 'What to act on',
+        kind: 'table',
+        columns: ['#', 'Recommendation'],
+        rows: forecast.managerTips.map((tip, i) => [i + 1, tip]),
+      });
+    }
+
+    // 3. Special days to prepare for — the highest-leverage info on this page
+    if (forecast.notableEvents?.length) {
+      const weekends = forecast.notableEvents.filter((e) => e.event === 'Weekend');
+      const special = forecast.notableEvents.filter((e) => e.event !== 'Weekend');
+
+      // Group special events by type into date ranges (matches the UI)
+      const byEvent = new Map();
+      for (const e of special) {
+        if (!byEvent.has(e.event)) byEvent.set(e.event, new Set());
+        byEvent.get(e.event).add(e.date);
+      }
+      const fmtShortDay = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+      const eventRows = [];
+      for (const [event, dateSet] of byEvent) {
+        const sorted = [...dateSet].sort();
+        const ranges = [];
+        for (const d of sorted) {
+          const last = ranges[ranges.length - 1];
+          if (last) {
+            const diff = Math.round((new Date(d + 'T00:00:00') - new Date(last.endDate + 'T00:00:00')) / 86400000);
+            if (diff === 1) { last.endDate = d; last.count += 1; continue; }
+          }
+          ranges.push({ startDate: d, endDate: d, count: 1 });
+        }
+        const rangeLabel = ranges.map((r) =>
+          r.count === 1 ? fmtShortDay(r.startDate) : `${fmtShortDay(r.startDate)} – ${fmtShortDay(r.endDate)}`
+        ).join(', ');
+        eventRows.push([event, rangeLabel, `${sorted.length} day${sorted.length === 1 ? '' : 's'}`]);
+      }
+      if (weekends.length) {
+        eventRows.push(['Weekends (Fri & Sat)', '—', `${weekends.length} days`]);
+      }
+
+      if (eventRows.length) {
+        sections.push({
+          name: 'Special days to prepare for',
+          kind: 'table',
+          columns: ['Event', 'Dates', 'Days affected'],
+          rows: eventRows,
+        });
+      }
+    }
+
+    // 4. Day-of-week pattern — useful for staffing rotas
+    if (dayOfWeekPattern.length) {
+      const total = dayOfWeekPattern.reduce((s, r) => s + r.qty, 0);
+      sections.push({
+        name: 'Day-of-week demand pattern (for staffing)',
+        kind: 'table',
+        columns: ['Day', 'Units expected', 'Share'],
+        rows: dayOfWeekPattern.map((d) => [
+          d.day,
+          fmtNum(d.qty),
+          total > 0 ? `${((d.qty / total) * 100).toFixed(1)}%` : '—',
+        ]),
+        totals: ['Total', fmtNum(total), '100.0%'],
+      });
+    }
+
+    // 5. Top revenue drivers — what to keep in stock
+    if (forecast.topItems?.length) {
+      sections.push({
+        name: 'Top revenue drivers — keep these in stock',
+        kind: 'table',
+        columns: ['#', 'Product', 'Category', 'Expected units', 'Note'],
+        rows: forecast.topItems.map((row, i) => [
+          i + 1,
+          row.name,
+          row.category || '—',
+          fmtNum(row.totalPredictedQuantity),
+          row.seasonal?.isSeasonal ? `Seasonal (${row.seasonal.label})` : '',
+        ]),
+      });
+    }
+
+    // 6. Watchlist — items at risk; manager can decide promo / price / cut
+    if (forecast.bottomItems?.length) {
+      sections.push({
+        name: 'Watchlist — slowest items, decision needed',
+        kind: 'table',
+        columns: ['#', 'Product', 'Category', 'Expected units', 'Context'],
+        rows: forecast.bottomItems.map((row, i) => [
+          i + 1,
+          row.name,
+          row.category || '—',
+          fmtNum(row.totalPredictedQuantity),
+          row.seasonal?.isSeasonal
+            ? `Out of season — ${row.seasonal.label} item; low here may be normal`
+            : 'Consider a promotion, price review, or removal',
+        ]),
+      });
+    }
+
+    // 7. Top categories (only useful for total scope)
+    if (forecast.scope === 'total' && forecast.categories?.length) {
+      const total = forecast.categories.reduce((s, c) => s + (c.totalPredictedQuantity || 0), 0);
+      sections.push({
+        name: 'Demand by category',
+        kind: 'table',
+        columns: ['Category', 'Expected units', 'Share'],
+        rows: forecast.categories.map((c) => [
+          c.name,
+          fmtNum(c.totalPredictedQuantity),
+          total > 0 ? `${((c.totalPredictedQuantity / total) * 100).toFixed(1)}%` : '—',
+        ]),
+        totals: ['Total', fmtNum(total), '100.0%'],
+      });
+    }
+
+    return {
+      title: 'Sales Forecast Report',
+      subtitle: scopeLabel,
+      meta,
+      sections,
+    };
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -519,6 +703,15 @@ const Forecasting = () => {
       {/* Results */}
       {forecast && (
         <>
+          {/* Export — manager-focused report covering the active forecast */}
+          <div className="flex justify-end">
+            <ExportMenu
+              buildReport={buildForecastReport}
+              baseFilename={`forecast-${forecast.scope}-${effectiveDays}d`}
+              disabled={loading}
+            />
+          </div>
+
           {/* Headline KPIs — focus on what a manager cares about most */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Revenue — the hero number */}
@@ -621,6 +814,7 @@ const Forecasting = () => {
               'Eid al-Fitr':          '🕌',
               'Eid al-Adha':          '🕌',
               'Saudi National Day':   '🇸🇦',
+              'Saudi Founding Day':   '🇸🇦',
               'Payday':               '💰',
               'Post-payday spending': '🛍️',
             }[ev] || '📅');
@@ -628,29 +822,44 @@ const Forecasting = () => {
               ev === 'Ramadan'              ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
               : ev.startsWith('Eid')        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
               : ev === 'Saudi National Day' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+              : ev === 'Saudi Founding Day' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
               : ev === 'Payday'             ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
               : 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400';
 
-            // Group consecutive same-event days into ranges. Without
-            // this, a 9-day "Post-payday spending" window renders as
-            // 9 identical pills cluttering the panel.
-            const sortedSpecial = [...special].sort((a, b) => a.date.localeCompare(b.date));
-            const groups = [];
-            for (const e of sortedSpecial) {
-              const last = groups[groups.length - 1];
-              const eDate = new Date(e.date + 'T00:00:00');
-              if (last && last.event === e.event) {
-                const lastEnd = new Date(last.endDate + 'T00:00:00');
-                const dayDiff = Math.round((eDate - lastEnd) / 86400000);
-                if (dayDiff === 1) {
-                  last.endDate = e.date;
-                  last.count += 1;
-                  continue;
-                }
-              }
-              groups.push({ event: e.event, startDate: e.date, endDate: e.date, count: 1 });
+            // Group by EVENT TYPE first, then by consecutive date
+            // ranges within each type. The previous date-first grouping
+            // broke when multiple event types overlapped on the same
+            // day (Eid + Payday + Post-payday on May 27-30 fragmented
+            // into 8 pills with confusing single-day chunks).
+            const byEvent = new Map();
+            for (const e of special) {
+              if (!byEvent.has(e.event)) byEvent.set(e.event, new Set());
+              byEvent.get(e.event).add(e.date);
             }
             const fmtDay = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            // For each event type, build comma-separated ranges
+            // (e.g. "May 1-5, May 28-Jun 5, Jun 28-Jul 5"). One pill
+            // per event type instead of one per range.
+            const eventOrder = ['Ramadan', 'Eid al-Fitr', 'Eid al-Adha', 'Saudi National Day', 'Saudi Founding Day', 'Payday', 'Post-payday spending'];
+            const groups = [];
+            for (const event of eventOrder.concat([...byEvent.keys()].filter(k => !eventOrder.includes(k)))) {
+              if (!byEvent.has(event)) continue;
+              const sorted = [...byEvent.get(event)].sort();
+              const ranges = [];
+              for (const d of sorted) {
+                const last = ranges[ranges.length - 1];
+                if (last) {
+                  const diff = Math.round((new Date(d + 'T00:00:00') - new Date(last.endDate + 'T00:00:00')) / 86400000);
+                  if (diff === 1) { last.endDate = d; last.count += 1; continue; }
+                }
+                ranges.push({ startDate: d, endDate: d, count: 1 });
+              }
+              const totalDays = sorted.length;
+              const rangeLabel = ranges.map(r =>
+                r.count === 1 ? fmtDay(r.startDate) : `${fmtDay(r.startDate)}–${fmtDay(r.endDate)}`
+              ).join(', ');
+              groups.push({ event, totalDays, rangeLabel });
+            }
 
             return (
               <div className="card dark:bg-gray-800 dark:border-gray-700">
@@ -668,15 +877,13 @@ const Forecasting = () => {
                       </span>
                     </span>
                   )}
-                  {groups.map((g, i) => (
-                    <span key={i} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${color(g.event)}`}>
+                  {groups.map((g) => (
+                    <span key={g.event} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium ${color(g.event)}`}>
                       <span>{emoji(g.event)}</span>
-                      <span>{g.event}</span>
-                      <span className="opacity-70">
-                        {' · '}
-                        {g.count === 1
-                          ? fmtDay(g.startDate)
-                          : `${fmtDay(g.startDate)} – ${fmtDay(g.endDate)} (${g.count} days)`}
+                      <span className="font-semibold">{g.event}</span>
+                      <span className="opacity-75">
+                        {' · '}{g.rangeLabel}
+                        {g.totalDays > 1 && <span className="opacity-70"> ({g.totalDays} days)</span>}
                       </span>
                     </span>
                   ))}
@@ -715,7 +922,28 @@ const Forecasting = () => {
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" opacity={0.4} />
-                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#6b7280' }} stroke="#e5e7eb" />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 11, fill: '#6b7280' }}
+                    stroke="#e5e7eb"
+                    // Compute explicit, evenly-spaced ticks so the gap
+                    // between every visible label is the same. Recharts'
+                    // built-in interval/preserveStartEnd combo always
+                    // anchored the last label, which forced an uneven
+                    // gap at the right edge (e.g. "May 25 → May 30"
+                    // when other gaps were 3 days).
+                    ticks={(() => {
+                      const n = chartData.length;
+                      if (n === 0) return [];
+                      // Aim for ~7 evenly-spaced labels, with the step
+                      // rounded so it divides the data length cleanly.
+                      const targetCount = Math.min(8, Math.max(4, Math.floor(n / 4)));
+                      const step = Math.max(1, Math.round(n / targetCount));
+                      const idxs = [];
+                      for (let i = 0; i < n; i += step) idxs.push(i);
+                      return idxs.map((i) => chartData[i].label);
+                    })()}
+                  />
                   <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} stroke="#e5e7eb" width={40} />
                   <Tooltip
                     content={({ active, payload, label }) => {
@@ -888,7 +1116,17 @@ const Forecasting = () => {
                           {i + 1}
                         </span>
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-gray-900 dark:text-white truncate">{row.name}</p>
+                          <p className="font-medium text-gray-900 dark:text-white truncate flex items-center gap-1.5">
+                            {row.name}
+                            {row.seasonal?.isSeasonal && (
+                              <span
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 flex-shrink-0"
+                                title={`Sells primarily in ${row.seasonal.label} (${row.seasonal.concentrationPct}% of annual sales)`}
+                              >
+                                🍂 {row.seasonal.label}
+                              </span>
+                            )}
+                          </p>
                           <p className="text-[11px] text-gray-500 dark:text-gray-400">{row.category}</p>
                         </div>
                         <span className="font-semibold text-gray-900 dark:text-white flex-shrink-0">
@@ -908,7 +1146,7 @@ const Forecasting = () => {
                     Watch-list — slowest 5 items
                   </h3>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                    Lowest predicted demand. Candidates for a promotion, price adjustment, or menu removal.
+                    Lowest predicted demand. Candidates for a promotion, price adjustment, or menu removal — but check the seasonal tag first; some items only sell at specific times of year.
                   </p>
                   <ol className="space-y-2">
                     {forecast.bottomItems.map((row, i) => (
@@ -917,7 +1155,17 @@ const Forecasting = () => {
                           {i + 1}
                         </span>
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-gray-900 dark:text-white truncate">{row.name}</p>
+                          <p className="font-medium text-gray-900 dark:text-white truncate flex items-center gap-1.5">
+                            {row.name}
+                            {row.seasonal?.isSeasonal && (
+                              <span
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 flex-shrink-0"
+                                title={`Sells primarily in ${row.seasonal.label} (${row.seasonal.concentrationPct}% of annual sales). Low forecast here may just mean we're outside its season.`}
+                              >
+                                🍂 {row.seasonal.label}
+                              </span>
+                            )}
+                          </p>
                           <p className="text-[11px] text-gray-500 dark:text-gray-400">{row.category}</p>
                         </div>
                         <span className="font-semibold text-gray-900 dark:text-white flex-shrink-0">

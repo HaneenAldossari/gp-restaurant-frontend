@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Eye, EyeOff, BarChart3, Lock, User, AlertCircle } from 'lucide-react';
+import { Eye, EyeOff, BarChart3, Lock, Mail, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const Login = () => {
@@ -9,7 +9,7 @@ const Login = () => {
   const { login } = useAuth();
 
   const [formData, setFormData] = useState({
-    username: '',
+    email: '',
     password: '',
     rememberMe: false
   });
@@ -34,7 +34,7 @@ const Login = () => {
     setError('');
 
     try {
-      await login(formData.username, formData.password);
+      await login(formData.email, formData.password);
       navigate(from, { replace: true });
     } catch (err) {
       setError(err.message || 'Login failed. Please try again.');
@@ -120,19 +120,19 @@ const Login = () => {
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Username
+                  Email
                 </label>
                 <div className="relative">
-                  <User className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                  <Mail className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                   <input
-                    type="text"
-                    name="username"
-                    value={formData.username}
+                    type="email"
+                    name="email"
+                    value={formData.email}
                     onChange={handleChange}
-                    placeholder="Enter your username"
+                    placeholder="you@example.com"
                     className="input pl-12 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                     required
-                    autoComplete="username"
+                    autoComplete="email"
                   />
                 </div>
               </div>

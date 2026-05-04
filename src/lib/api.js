@@ -20,10 +20,32 @@ export function setWorkspaceUserId(id) {
   else localStorage.setItem(USER_ID_KEY, String(id));
 }
 
+// JWT issued by /api/auth/login. Attached as Authorization: Bearer
+// on every subsequent request. The backend's auth.py prefers JWT over
+// X-User-Id, so an authenticated user always sees THEIR scope; the
+// X-User-Id workspace switcher remains as a demo fallback for the
+// pre-auth pages.
+const AUTH_TOKEN_KEY = 'gp.auth.token';
+
+export function getAuthToken() {
+  return localStorage.getItem(AUTH_TOKEN_KEY);
+}
+
+export function setAuthToken(token) {
+  if (token == null) localStorage.removeItem(AUTH_TOKEN_KEY);
+  else localStorage.setItem(AUTH_TOKEN_KEY, token);
+}
+
 async function request(path, { method = 'GET', body = null } = {}) {
   const init = { method, headers: {} };
-  const userId = getWorkspaceUserId();
-  if (userId) init.headers['X-User-Id'] = String(userId);
+  const token = getAuthToken();
+  if (token) {
+    init.headers['Authorization'] = `Bearer ${token}`;
+  } else {
+    // No JWT yet (legacy demo flow) — fall back to the workspace switcher
+    const userId = getWorkspaceUserId();
+    if (userId) init.headers['X-User-Id'] = String(userId);
+  }
   if (body instanceof FormData) {
     init.body = body;
   } else if (body) {
@@ -38,6 +60,8 @@ async function request(path, { method = 'GET', body = null } = {}) {
     const err = new Error(message);
     err.status = res.status;
     err.detail = detail;
+    // 401 = expired/invalid token — clear so we redirect to login next render
+    if (res.status === 401 && token) setAuthToken(null);
     throw err;
   }
   return data;
@@ -145,4 +169,41 @@ export function fetchHealth() {
 //           forecastStart, forecastEndMax, forecastMaxDays }
 export function fetchDataRange() {
   return request('/api/data-range');
+}
+
+// ── Auth ───────────────────────────────────────────────────────────────
+// Login returns { access_token, token_type, user }. AuthContext stores
+// the token via setAuthToken and the user object in React state.
+export function login(email, password) {
+  return request('/api/auth/login', {
+    method: 'POST',
+    body: { email, password },
+  });
+}
+
+export function fetchCurrentUser() {
+  return request('/api/auth/me');
+}
+
+// ── Team management (manager only) ─────────────────────────────────────
+export function fetchSubUsers() {
+  return request('/api/team/sub-users');
+}
+
+export function createSubUser({ name, email, password, permission }) {
+  return request('/api/team/sub-users', {
+    method: 'POST',
+    body: { name, email, password, permission },
+  });
+}
+
+export function updateSubUser(id, patch) {
+  return request(`/api/team/sub-users/${id}`, {
+    method: 'PATCH',
+    body: patch,
+  });
+}
+
+export function deleteSubUser(id) {
+  return request(`/api/team/sub-users/${id}`, { method: 'DELETE' });
 }
