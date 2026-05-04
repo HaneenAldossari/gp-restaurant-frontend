@@ -198,23 +198,37 @@ const Login = () => {
               </button>
             </form>
 
-            {/* Demo Credentials */}
+            {/* Real teammate accounts auto-seeded by the backend
+                (see backend/seed_users.py). The previous "admin /
+                admin123" cards were leftover demo placeholders that
+                didn't correspond to any real account in the database
+                — clicking them just produced "Not Found" from the
+                login endpoint. Click a card to autofill the form. */}
             <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
-              <p className="text-xs text-center text-gray-500 dark:text-gray-400 mb-3">Demo Credentials</p>
-              <div className="grid grid-cols-3 gap-2 text-xs">
-                <div className="p-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg text-center">
-                  <p className="font-medium text-gray-900 dark:text-white">Admin</p>
-                  <p className="text-gray-500 dark:text-gray-400">admin / admin123</p>
-                </div>
-                <div className="p-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg text-center">
-                  <p className="font-medium text-gray-900 dark:text-white">Manager</p>
-                  <p className="text-gray-500 dark:text-gray-400">manager / manager123</p>
-                </div>
-                <div className="p-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg text-center">
-                  <p className="font-medium text-gray-900 dark:text-white">Cashier</p>
-                  <p className="text-gray-500 dark:text-gray-400">cashier / cashier123</p>
-                </div>
+              <p className="text-xs text-center text-gray-500 dark:text-gray-400 mb-3">
+                Team accounts — password for all: <span className="font-semibold">demo1234</span>
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                {[
+                  { name: 'Haneen', email: 'haneen@psau.sa' },
+                  { name: 'Arwa',   email: 'arwa@psau.sa' },
+                  { name: 'Noura',  email: 'noura@psau.sa' },
+                  { name: 'Norah',  email: 'norah@psau.sa' },
+                ].map((u) => (
+                  <button
+                    key={u.email}
+                    type="button"
+                    onClick={() => setFormData({ ...formData, email: u.email, password: 'demo1234' })}
+                    className="p-2 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-center transition"
+                  >
+                    <p className="font-medium text-gray-900 dark:text-white">{u.name}</p>
+                    <p className="text-gray-500 dark:text-gray-400 truncate text-[10px]">{u.email}</p>
+                  </button>
+                ))}
               </div>
+              <p className="text-[11px] text-center text-gray-400 mt-2">
+                Shared demo workspace: <span className="font-mono">demo@psau.sa</span>
+              </p>
             </div>
           </div>
         </div>
