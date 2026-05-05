@@ -35,6 +35,7 @@ import {
 } from 'recharts';
 import KPICard from '../components/ui/KPICard';
 import DataTable from '../components/ui/DataTable';
+import HeatmapChart from '../components/charts/HeatmapChart';
 import {
   fetchForecastTotal,
   fetchForecastCategory,
@@ -896,6 +897,43 @@ const Forecasting = () => {
               </div>
             );
           })()}
+
+          {/* Forecast-driven activity heatmap (weekday × hour). Cell
+              values are aggregated from the FORECAST yhat for the
+              active window — so days lifted by Eid, payday, etc.
+              glow brighter than they did historically. The hour
+              shape inside each (weekday, time-period) bucket is
+              borrowed from history (Prophet predicts at time-period
+              granularity, not hour). Hidden for item scope where
+              the volume is too small for a meaningful heatmap. */}
+          {forecast.scope !== 'item' && (forecast.heatmapData?.length ?? 0) > 0 && (
+            <div className="space-y-3">
+              {forecast.heatmapPeak && (
+                <div className="rounded-lg border border-primary-200 dark:border-primary-800 bg-primary-50 dark:bg-primary-900/20 p-3 text-sm flex items-start gap-2">
+                  <span className="flex-shrink-0 mt-0.5">📈</span>
+                  <div className="leading-relaxed text-primary-900 dark:text-primary-200">
+                    Busiest hour-weekday in this window: <span className="font-semibold">{forecast.heatmapPeak.day} {forecast.heatmapPeak.hour}</span>
+                    {' '}— expected ~<span className="font-semibold">{forecast.heatmapPeak.value.toLocaleString()} units/hour</span>
+                    {forecast.heatmapPeak.vsAverage != null && forecast.heatmapPeak.vsAverage > 0 && (
+                      <> ({forecast.heatmapPeak.vsAverage > 0 ? '+' : ''}{forecast.heatmapPeak.vsAverage}% above average). Schedule extra staff there.</>
+                    )}
+                  </div>
+                </div>
+              )}
+              <HeatmapChart
+                data={forecast.heatmapData}
+                title={
+                  forecast.scope === 'total'
+                    ? 'Predicted activity — Day × Hour'
+                    : `Predicted activity — Day × Hour (${forecast.target})`
+                }
+                loading={loading}
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 px-1">
+                Cell intensity = predicted units across the active forecast window. Specific upcoming events (Eid, Ramadan, payday, weekly seasonality) shift these patterns vs. a pure historical view.
+              </p>
+            </div>
+          )}
 
           {/* Main chart — simple AreaChart driven by recharts directly */}
           <div className="card dark:bg-gray-800 dark:border-gray-700">

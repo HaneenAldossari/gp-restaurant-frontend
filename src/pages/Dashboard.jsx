@@ -18,7 +18,6 @@ import {
 import KPICard from '../components/ui/KPICard';
 import SalesAreaChart from '../components/charts/SalesAreaChart';
 import DonutChart from '../components/charts/DonutChart';
-import HeatmapChart from '../components/charts/HeatmapChart';
 import BarChart from '../components/charts/BarChart';
 import DataTable from '../components/ui/DataTable';
 import Badge from '../components/ui/Badge';
@@ -230,21 +229,10 @@ const Dashboard = () => {
   const [showAllByRevenue, setShowAllByRevenue] = useState(false);
   const [showAllByQty, setShowAllByQty] = useState(false);
 
-  const heatmapData = useMemo(() => {
-    // Backend gives { day: 'Mon', hour: '9AM', value: 42 } rows.
-    // HeatmapChart component may expect its own shape; pass through and let it handle.
-    return data?.heatmapData ?? [];
-  }, [data]);
-
-  // Detect whether the uploaded data actually has time-of-day signal. If every
-  // heatmap cell is 0, the uploaded file didn't include order times (every
-  // order ends up at midnight → hour 0 → outside the 9AM–10PM window). In that
-  // case the heatmap is useless; we degrade to a day-of-week orders bar chart
-  // derived from the daily series, which is meaningful without time info.
-  const hasHourSignal = useMemo(
-    () => heatmapData.some((d) => (d.value || 0) > 0),
-    [heatmapData]
-  );
+  // Hour-of-day heatmap moved to the Forecasting page, where it shows
+  // forecast-driven (not historical) intensity. Dashboard now sticks
+  // to the simpler day-of-week bar — fewer overlapping signals on one
+  // page, and lets the Forecasting page own the heatmap story.
 
   // Prefer the backend's pre-aggregated stats (includes units + revenue).
   // Fall back to deriving from dailyRevenue for older backends.
@@ -721,17 +709,11 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Heatmap — or day-of-week fallback when the uploaded data has no
-          time-of-day information (every hour would otherwise read as 0). */}
-      {hasHourSignal ? (
-        <HeatmapChart
-          data={heatmapData}
-          title="Orders by Day × Hour"
-          loading={loading}
-        />
-      ) : (
-        <DayOfWeekBar data={ordersByDayOfWeek} loading={loading} />
-      )}
+      {/* Day-of-week pattern. The hour-by-day heatmap moved to the
+          Forecasting page where it reflects upcoming activity; here
+          the simpler bar chart keeps the dashboard scannable. */}
+      <DayOfWeekBar data={ordersByDayOfWeek} loading={loading} />
+
 
       {/* Top products — shows 10 by default, expand to reveal all */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
