@@ -111,7 +111,7 @@ const MenuEngineering = () => {
       <EmptyState
         emoji="🍽️"
         title="Menu insights will light up here"
-        message="Upload your sales file and we'll classify your items into Stars, Plowhorses, Puzzles, and Dogs."
+        message="Upload your sales file and we'll classify your items into Hero items, Popular tight-margin sellers, Hidden gems, and Underperformers."
       />
     );
   }
@@ -202,11 +202,11 @@ const MenuEngineering = () => {
       totals: ['Total', fmtNum(items.length), fmtNum(totalRev), '100.0%', ''],
     });
 
-    // 2. Stars — keep featuring (top 10 by revenue)
+    // 2. Hero items — keep featuring (top 10 by revenue)
     if (grouped.Star.length) {
       const top = grouped.Star.slice(0, 10);
       sections.push({
-        name: '⭐ Stars — keep featuring, protect supply',
+        name: '⭐ Hero items — keep featuring, protect supply',
         kind: 'table',
         columns: ['Product', 'Category', 'Units', 'Revenue (SAR)', 'Margin'],
         rows: top.map((it) => [
@@ -216,12 +216,12 @@ const MenuEngineering = () => {
       });
     }
 
-    // 3. Plowhorses — popular but tight margin (top 10 by revenue);
+    // 3. Popular but tight margin (top 10 by revenue);
     // these are the highest-leverage price/cost interventions
     if (grouped.Plowhorse.length) {
       const top = grouped.Plowhorse.slice(0, 10);
       sections.push({
-        name: '🐎 Plowhorses — popular but tight margin; raise price or cut cost',
+        name: '🔥 Popular, tight margin — raise price or cut cost',
         kind: 'table',
         columns: ['Product', 'Category', 'Units', 'Price (SAR)', 'Cost (SAR)', 'Margin'],
         rows: top.map((it) => [
@@ -232,13 +232,13 @@ const MenuEngineering = () => {
       });
     }
 
-    // 4. Puzzles — high margin, low volume; promote these
+    // 4. Hidden gems — high margin, low volume; promote these
     if (grouped.Puzzle.length) {
-      // Sort puzzles by margin (highest first) since revenue is small;
+      // Sort by margin (highest first) since revenue is small;
       // a manager wants to know "which one has the BEST profit per sale"
       const top = [...grouped.Puzzle].sort((a, b) => (b.profitMargin || 0) - (a.profitMargin || 0)).slice(0, 10);
       sections.push({
-        name: '🧩 Puzzles — feature in promotions',
+        name: '🧩 Hidden gems — feature in promotions',
         kind: 'table',
         columns: ['Product', 'Category', 'Margin', 'Revenue (SAR)', 'Units'],
         rows: top.map((it) => [
@@ -248,11 +248,11 @@ const MenuEngineering = () => {
       });
     }
 
-    // 5. Dogs — rework or remove (bottom 10 by revenue)
+    // 5. Underperformers — rework or remove (bottom 10 by revenue)
     if (grouped.Dog.length) {
       const bottom = [...grouped.Dog].sort((a, b) => (a.revenue || 0) - (b.revenue || 0)).slice(0, 10);
       sections.push({
-        name: '🐕 Dogs — rework recipe or remove',
+        name: '⚠️ Underperformers — rework recipe or remove',
         kind: 'table',
         columns: ['Product', 'Category', 'Units', 'Revenue (SAR)', 'Margin'],
         rows: bottom.map((it) => [
@@ -628,6 +628,17 @@ const MenuEngineering = () => {
               const newQty = sim.simulated.projectedQty;
               const currQty = sim.current.qtySold;
               const profitDiff = Math.round(sim.simulated.newProfit - sim.current.profit);
+              // Per-unit profit (price − cost) — shown so the manager
+              // can see at-a-glance how much each individual sale earns
+              // before the slider change and after. Floors cost at 0
+              // matching the cost slider's clamp on line 610.
+              const currPerUnitProfit = targetItem.price - targetItem.cost;
+              const newPerUnitProfit =
+                (targetItem.price + priceDelta) - Math.max(0, targetItem.cost + costDelta);
+              const perUnitDiff = newPerUnitProfit - currPerUnitProfit;
+              const perUnitMarginPct = (targetItem.price + priceDelta) > 0
+                ? Math.round((newPerUnitProfit / (targetItem.price + priceDelta)) * 100)
+                : 0;
               const priceWentUp = priceDelta > 0;
               const priceWentDown = priceDelta < 0;
               const itemClass = targetItem?.classification;
@@ -704,7 +715,7 @@ const MenuEngineering = () => {
                         )}
                       </div>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                       <div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Units sold</p>
                         <p className="text-3xl font-bold text-gray-900 dark:text-white leading-tight">
@@ -715,7 +726,23 @@ const MenuEngineering = () => {
                         </p>
                       </div>
                       <div>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Profit change</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 flex items-center gap-1">
+                          Profit per unit
+                          <span className="text-gray-400 dark:text-gray-500" title="Selling price minus unit cost. The earnings on a single sale.">
+                            <Info size={11} />
+                          </span>
+                        </p>
+                        <p className={`text-3xl font-bold leading-tight ${newPerUnitProfit >= 0 ? 'text-gray-900 dark:text-white' : 'text-danger-600 dark:text-danger-400'}`}>
+                          SAR {Math.max(0, newPerUnitProfit).toFixed(2)}
+                        </p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                          {perUnitDiff >= 0 ? '+' : '−'}SAR {Math.abs(perUnitDiff).toFixed(2)} vs SAR {currPerUnitProfit.toFixed(2)} now
+                          {' · '}
+                          <span className="opacity-80">{perUnitMarginPct}% margin</span>
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Total profit change</p>
                         <p className={`text-3xl font-bold leading-tight ${profitDiff >= 0 ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`}>
                           {profitDiff >= 0 ? '+' : '−'}SAR {Math.abs(profitDiff).toLocaleString()}
                         </p>

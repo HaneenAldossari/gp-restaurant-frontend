@@ -212,12 +212,40 @@ const Forecasting = () => {
   const dayOfWeekPattern = useMemo(() => {
     if (!chartData.length) return [];
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const totals = {};
+    const qtyTotals = {};
+    const revTotals = {};
+    const counts = {};
     for (const row of chartData) {
-      totals[row.dayOfWeek] = (totals[row.dayOfWeek] || 0) + row.predicted;
+      qtyTotals[row.dayOfWeek] = (qtyTotals[row.dayOfWeek] || 0) + (row.predicted || 0);
+      revTotals[row.dayOfWeek] = (revTotals[row.dayOfWeek] || 0) + (row.revenue || 0);
+      counts[row.dayOfWeek] = (counts[row.dayOfWeek] || 0) + 1;
     }
-    return days.filter((d) => d in totals).map((d) => ({ day: d, qty: totals[d] }));
+    return days
+      .filter((d) => d in qtyTotals)
+      .map((d) => ({
+        day: d,
+        // Cumulative across the window — kept for the export and the tooltip.
+        qty: qtyTotals[d],
+        revenue: Math.round(revTotals[d]),
+        // Average per occurrence of this weekday in the window, so a
+        // 30-day forecast with 4 Saturdays vs 5 Sundays compares fairly.
+        // This is the value plotted on the bar chart.
+        avgRevenue: counts[d] > 0 ? Math.round(revTotals[d] / counts[d]) : 0,
+        avgQty: counts[d] > 0 ? Math.round(qtyTotals[d] / counts[d]) : 0,
+        occurrences: counts[d],
+      }));
   }, [chartData]);
+
+  // Single highest-revenue weekday — surfaced as a one-line summary
+  // above the day-of-week chart so a manager doesn't have to read the
+  // bars to find the answer.
+  const busiestWeekday = useMemo(() => {
+    if (dayOfWeekPattern.length === 0) return null;
+    const fullName = { Sun: 'Sunday', Mon: 'Monday', Tue: 'Tuesday',
+                       Wed: 'Wednesday', Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday' };
+    const top = dayOfWeekPattern.reduce((best, d) => (d.avgRevenue > best.avgRevenue ? d : best), dayOfWeekPattern[0]);
+    return { ...top, fullName: fullName[top.day] || top.day };
+  }, [dayOfWeekPattern]);
 
   // Best seller: top item (category scope) or top category (total scope)
   const bestSeller = useMemo(() => {
@@ -940,13 +968,14 @@ const Forecasting = () => {
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-base font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                 <LineChartIcon className="w-5 h-5 text-primary-500" />
-                {forecast.scope === 'total' ? 'Daily forecast — whole menu' :
-                 `Daily forecast — ${forecast.target}`}
+                {forecast.scope === 'total'
+                  ? 'Daily forecast — predicted units sold (whole menu)'
+                  : `Daily forecast — predicted units sold (${forecast.target})`}
               </h3>
               <span className="text-xs text-gray-500 dark:text-gray-400">
-                {chartData.length} days · {forecast.totalPredictedQuantity.toLocaleString()} units
+                {chartData.length} days · {forecast.totalPredictedQuantity.toLocaleString()} units total
                 {forecast.totalPredictedRevenue != null && (
-                  <> · SAR {Math.round(forecast.totalPredictedRevenue).toLocaleString()}</>
+                  <> · SAR {Math.round(forecast.totalPredictedRevenue).toLocaleString()} revenue</>
                 )}
               </span>
             </div>
@@ -982,7 +1011,12 @@ const Forecasting = () => {
                       return idxs.map((i) => chartData[i].label);
                     })()}
                   />
-                  <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} stroke="#e5e7eb" width={40} />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: '#6b7280' }}
+                    stroke="#e5e7eb"
+                    width={48}
+                    label={{ value: 'units', angle: -90, position: 'insideLeft', style: { fontSize: 10, fill: '#9ca3af' } }}
+                  />
                   <Tooltip
                     content={({ active, payload, label }) => {
                       if (!active || !payload?.length) return null;
@@ -994,7 +1028,7 @@ const Forecasting = () => {
                           </p>
                           <div className="space-y-0.5 text-xs">
                             <div className="flex items-center justify-between gap-4">
-                              <span className="text-gray-500 dark:text-gray-400">Units</span>
+                              <span className="text-gray-500 dark:text-gray-400">Predicted units sold</span>
                               <span className="font-semibold text-gray-900 dark:text-white">≈ {predicted.toLocaleString()}</span>
                             </div>
                             <div className="flex items-center justify-between gap-4">
@@ -1042,34 +1076,84 @@ const Forecasting = () => {
             )}
           </div>
 
-          {/* Day-of-week pattern */}
+          {/* Day-of-week pattern — revenue view (units shown per-day in
+              the line chart above; this card answers a different
+              question: "which weekday brings in the most money?"). */}
           {dayOfWeekPattern.length > 1 && (
             <div className="card dark:bg-gray-800 dark:border-gray-700">
               <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-1 flex items-center gap-2">
                 <Calendar className="w-5 h-5 text-primary-500" />
-                Busiest days of the week
+                Best-earning days of the week — predicted revenue (SAR)
               </h3>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-                Adds up every Sunday, Monday, etc. across your {effectiveDays}-day forecast so you can spot weekly patterns.
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                Average predicted revenue per Sunday / Monday / etc. across your {effectiveDays}-day forecast. Averages (not totals) so a window with extra Saturdays doesn't bias the comparison.
               </p>
+              {busiestWeekday && (
+                <div className="mb-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-primary-50 text-primary-700 border border-primary-200 dark:bg-primary-900/20 dark:text-primary-300 dark:border-primary-800">
+                  <TrendingUp className="w-3.5 h-3.5" />
+                  Top earner: <span className="font-semibold">{busiestWeekday.fullName}</span>
+                  {' — '}
+                  <span className="font-semibold">≈ SAR {busiestWeekday.avgRevenue.toLocaleString()} per day</span>
+                  {busiestWeekday.occurrences > 1 && (
+                    <span className="opacity-70">
+                      {' '}({busiestWeekday.occurrences} {busiestWeekday.fullName}s in window, SAR {busiestWeekday.revenue.toLocaleString()} total)
+                    </span>
+                  )}
+                </div>
+              )}
               <div style={{ width: '100%', height: 220 }}>
                 <ResponsiveContainer>
                   <BarChart data={dayOfWeekPattern} margin={{ top: 10, right: 20, left: 0, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" opacity={0.4} />
                     <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#6b7280' }} stroke="#e5e7eb" />
-                    <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} stroke="#e5e7eb" width={40} />
-                    <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} formatter={(v) => [v.toLocaleString(), 'Predicted qty']} />
-                    <Bar dataKey="qty" radius={[6, 6, 0, 0]}>
+                    <YAxis
+                      tick={{ fontSize: 11, fill: '#6b7280' }}
+                      stroke="#e5e7eb"
+                      width={56}
+                      tickFormatter={(v) => v >= 1000 ? `${Math.round(v / 1000)}k` : v.toLocaleString()}
+                      label={{ value: 'SAR', angle: -90, position: 'insideLeft', style: { fontSize: 10, fill: '#9ca3af' } }}
+                    />
+                    <Tooltip
+                      content={({ active, payload, label }) => {
+                        if (!active || !payload?.length) return null;
+                        const { avgRevenue = 0, revenue = 0, avgQty = 0, occurrences = 0 } = payload[0].payload || {};
+                        return (
+                          <div className="bg-white dark:bg-gray-800 p-3 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 text-sm">
+                            <p className="font-semibold text-gray-900 dark:text-white mb-1.5">{label}</p>
+                            <div className="space-y-0.5 text-xs">
+                              <div className="flex items-center justify-between gap-4">
+                                <span className="text-gray-500 dark:text-gray-400">Average revenue per {label}</span>
+                                <span className="font-semibold text-gray-900 dark:text-white">≈ SAR {avgRevenue.toLocaleString()}</span>
+                              </div>
+                              <div className="flex items-center justify-between gap-4">
+                                <span className="text-gray-500 dark:text-gray-400">Average units sold</span>
+                                <span className="font-semibold text-gray-900 dark:text-white">≈ {avgQty.toLocaleString()}</span>
+                              </div>
+                              <div className="flex items-center justify-between gap-4 pt-1 border-t border-gray-100 dark:border-gray-700 mt-1">
+                                <span className="text-gray-400 dark:text-gray-500">Cumulative ({occurrences})</span>
+                                <span className="text-gray-600 dark:text-gray-300">SAR {revenue.toLocaleString()}</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }}
+                    />
+                    <Bar dataKey="avgRevenue" radius={[6, 6, 0, 0]}>
                       {dayOfWeekPattern.map((d, i) => (
                         <Cell key={i} fill={d.day === 'Fri' || d.day === 'Sat' ? '#f59e0b' : '#6366f1'} />
                       ))}
-                      <LabelList dataKey="qty" position="top" style={{ fontSize: 10, fill: '#6b7280' }} formatter={(v) => v.toLocaleString()} />
+                      <LabelList
+                        dataKey="avgRevenue"
+                        position="top"
+                        style={{ fontSize: 10, fill: '#6b7280' }}
+                        formatter={(v) => v >= 1000 ? `SAR ${Math.round(v / 1000)}k` : `SAR ${v.toLocaleString()}`}
+                      />
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
               <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-2">
-                Friday and Saturday are highlighted as the Saudi weekend (typically busier).
+                Bars show <span className="font-semibold">average</span> predicted revenue per weekday across the period. Friday and Saturday are highlighted as the Saudi weekend (typically busier). Hover any bar for cumulative totals.
               </p>
             </div>
           )}
