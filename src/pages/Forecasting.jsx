@@ -831,9 +831,50 @@ const Forecasting = () => {
             </div>
           )}
 
-          {/* Notable events in the window — weekends collapse into one
-              summary badge; rare events (Ramadan, Eid, National Day) are
-              still listed individually with their dates. */}
+          {/* Forecast-driven activity heatmap (weekday × hour). Cell
+              values are aggregated from the FORECAST yhat for the
+              active window — so days lifted by Eid, payday, etc.
+              glow brighter than they did historically. The hour
+              shape inside each (weekday, time-period) bucket is
+              borrowed from history (Prophet predicts at time-period
+              granularity, not hour). Hidden for item scope where
+              the volume is too small for a meaningful heatmap. */}
+          {forecast.scope !== 'item' && (forecast.heatmapData?.length ?? 0) > 0 && (
+            <div className="space-y-3">
+              {forecast.heatmapPeak && (
+                <div className="rounded-lg border border-primary-200 dark:border-primary-800 bg-primary-50 dark:bg-primary-900/20 p-3 text-sm flex items-start gap-2">
+                  <span className="flex-shrink-0 mt-0.5">📈</span>
+                  <div className="leading-relaxed text-primary-900 dark:text-primary-200">
+                    Busiest hour-weekday in this window: <span className="font-semibold">{forecast.heatmapPeak.day} {forecast.heatmapPeak.hour}</span>
+                    {' '}— expected ~<span className="font-semibold">{forecast.heatmapPeak.value.toLocaleString()} units/hour</span>
+                    {forecast.heatmapPeak.vsAverage != null && forecast.heatmapPeak.vsAverage > 0 && (
+                      <> ({forecast.heatmapPeak.vsAverage > 0 ? '+' : ''}{forecast.heatmapPeak.vsAverage}% above average). Schedule extra staff there.</>
+                    )}
+                  </div>
+                </div>
+              )}
+              <HeatmapChart
+                data={forecast.heatmapData}
+                title={
+                  forecast.scope === 'total'
+                    ? 'Typical week pattern — units by weekday × hour'
+                    : `Typical week pattern — units by weekday × hour (${forecast.target})`
+                }
+                loading={loading}
+              />
+              <p className="text-xs text-gray-500 dark:text-gray-400 px-1">
+                The cafe's learned weekly rhythm — busiest at weekend evenings, quietest on weekday mornings. The shape doesn't change much between a 7-day and a 90-day forecast because weekday × hour patterns are stable; specific dates with extra lift (Eid, payday, holidays) are listed below.
+              </p>
+            </div>
+          )}
+
+          {/* Notable events in the window — moved here so the manager
+              sees the typical pattern first (heatmap above), then the
+              specific dates that deviate from it (this panel), and
+              finally the daily forecast chart that lays out the whole
+              window day-by-day. Weekends collapse into one summary
+              badge; rare events (Ramadan, Eid, National Day) are
+              listed individually with their dates. */}
           {forecast.notableEvents?.length > 0 && (() => {
             const weekends = forecast.notableEvents.filter((e) => e.event === 'Weekend');
             const special = forecast.notableEvents.filter((e) => e.event !== 'Weekend');
@@ -855,20 +896,12 @@ const Forecasting = () => {
               : ev === 'Payday'             ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
               : 'bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400';
 
-            // Group by EVENT TYPE first, then by consecutive date
-            // ranges within each type. The previous date-first grouping
-            // broke when multiple event types overlapped on the same
-            // day (Eid + Payday + Post-payday on May 27-30 fragmented
-            // into 8 pills with confusing single-day chunks).
             const byEvent = new Map();
             for (const e of special) {
               if (!byEvent.has(e.event)) byEvent.set(e.event, new Set());
               byEvent.get(e.event).add(e.date);
             }
             const fmtDay = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            // For each event type, build comma-separated ranges
-            // (e.g. "May 1-5, May 28-Jun 5, Jun 28-Jul 5"). One pill
-            // per event type instead of one per range.
             const eventOrder = ['Ramadan', 'Eid al-Fitr', 'Eid al-Adha', 'Saudi National Day', 'Saudi Founding Day', 'Payday', 'Post-payday spending'];
             const groups = [];
             for (const event of eventOrder.concat([...byEvent.keys()].filter(k => !eventOrder.includes(k)))) {
@@ -925,43 +958,6 @@ const Forecasting = () => {
               </div>
             );
           })()}
-
-          {/* Forecast-driven activity heatmap (weekday × hour). Cell
-              values are aggregated from the FORECAST yhat for the
-              active window — so days lifted by Eid, payday, etc.
-              glow brighter than they did historically. The hour
-              shape inside each (weekday, time-period) bucket is
-              borrowed from history (Prophet predicts at time-period
-              granularity, not hour). Hidden for item scope where
-              the volume is too small for a meaningful heatmap. */}
-          {forecast.scope !== 'item' && (forecast.heatmapData?.length ?? 0) > 0 && (
-            <div className="space-y-3">
-              {forecast.heatmapPeak && (
-                <div className="rounded-lg border border-primary-200 dark:border-primary-800 bg-primary-50 dark:bg-primary-900/20 p-3 text-sm flex items-start gap-2">
-                  <span className="flex-shrink-0 mt-0.5">📈</span>
-                  <div className="leading-relaxed text-primary-900 dark:text-primary-200">
-                    Busiest hour-weekday in this window: <span className="font-semibold">{forecast.heatmapPeak.day} {forecast.heatmapPeak.hour}</span>
-                    {' '}— expected ~<span className="font-semibold">{forecast.heatmapPeak.value.toLocaleString()} units/hour</span>
-                    {forecast.heatmapPeak.vsAverage != null && forecast.heatmapPeak.vsAverage > 0 && (
-                      <> ({forecast.heatmapPeak.vsAverage > 0 ? '+' : ''}{forecast.heatmapPeak.vsAverage}% above average). Schedule extra staff there.</>
-                    )}
-                  </div>
-                </div>
-              )}
-              <HeatmapChart
-                data={forecast.heatmapData}
-                title={
-                  forecast.scope === 'total'
-                    ? 'Predicted activity — Day × Hour'
-                    : `Predicted activity — Day × Hour (${forecast.target})`
-                }
-                loading={loading}
-              />
-              <p className="text-xs text-gray-500 dark:text-gray-400 px-1">
-                Cell intensity = predicted units across the active forecast window. Specific upcoming events (Eid, Ramadan, payday, weekly seasonality) shift these patterns vs. a pure historical view.
-              </p>
-            </div>
-          )}
 
           {/* Main chart — simple AreaChart driven by recharts directly */}
           <div className="card dark:bg-gray-800 dark:border-gray-700">
