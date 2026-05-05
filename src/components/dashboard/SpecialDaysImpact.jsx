@@ -63,22 +63,57 @@ const SpecialDaysImpact = ({ dailyRevenue, startDate, endDate }) => {
       ? baselineRevs.reduce((s, x) => s + x, 0) / baselineRevs.length
       : null;
 
-    // Per-event impact
+    // Per-event impact. Each event has lead-up days ("phase=lead") and
+    // event-itself days ("phase=event"). The dataset can have full
+    // coverage of both, partial coverage (cafe closed for some days),
+    // or zero coverage (cafe closed for the whole event).
+    //
+    // Reviewer testing flagged the failure mode: Eid al-Fitr 2022 had
+    // NO data on the event-itself days (May 2-4) because the cafe
+    // closed for the holiday. The old code silently averaged whatever
+    // days had data — which was just the lead-up + Eid day 1 — and
+    // then labelled the result "Eid al-Fitr May 2-4: -50.8% vs normal."
+    // The label's date range and the data underneath disagreed.
+    //
+    // Fixed by:
+    //   • computing the actual measured date range from the days that
+    //     have data (instead of using the event's nominal start/end),
+    //   • flagging events where the cafe was clearly closed for most
+    //     of the event-itself days so the dashboard says so explicitly
+    //     instead of showing a misleading lift number.
     const impacts = events.map((ev) => {
-      const days = ev.daysInWindow.map((d) => ({
+      const allDays = ev.daysInWindow.map((d) => ({
         ...d, revenue: revByDate.get(d.date) ?? null,
-      })).filter((d) => d.revenue != null);
-      if (!days.length) return null;
-      const avg = days.reduce((s, d) => s + d.revenue, 0) / days.length;
+      }));
+      const daysWithData = allDays.filter((d) => d.revenue != null);
+      if (!daysWithData.length) return null;
+      // How well-covered is the EVENT-itself portion (excluding lead)?
+      // < 50 % coverage means we don't have enough data to claim a lift.
+      const eventDays = allDays.filter((d) => d.phase === 'event');
+      const eventDaysWithData = eventDays.filter((d) => d.revenue != null);
+      const eventCoverage = eventDays.length
+        ? eventDaysWithData.length / eventDays.length
+        : 0;
+      const wasMostlyClosed = eventDays.length > 0 && eventCoverage < 0.5;
+
+      const avg = daysWithData.reduce((s, d) => s + d.revenue, 0) / daysWithData.length;
       const liftPct = baselineAvg ? ((avg - baselineAvg) / baselineAvg) * 100 : 0;
-      const peakDay = days.reduce((a, b) => (b.revenue > a.revenue ? b : a));
+      const peakDay = daysWithData.reduce((a, b) => (b.revenue > a.revenue ? b : a));
+      // Label range = first to last day that actually had data
+      const measuredStart = daysWithData[0].date;
+      const measuredEnd = daysWithData[daysWithData.length - 1].date;
       return {
         event: ev,
         avg,
         baselineAvg,
         liftPct,
         peakDay,
-        days: days.length,
+        days: daysWithData.length,
+        wasMostlyClosed,
+        eventDaysWithData: eventDaysWithData.length,
+        eventDaysExpected: eventDays.length,
+        measuredStart,
+        measuredEnd,
       };
     }).filter(Boolean);
 
@@ -163,9 +198,13 @@ const SpecialDaysImpact = ({ dailyRevenue, startDate, endDate }) => {
           </div>
           {events.map((it) => {
             const positive = it.liftPct >= 0;
-            const dateLabel = it.event.start === it.event.end
-              ? fmtDay(it.event.start)
-              : `${fmtDay(it.event.start)} – ${fmtDay(it.event.end)}`;
+            // Date label = the actual measured range (days with data),
+            // not the nominal event window. Stops the panel from
+            // claiming "May 2 - May 4" when the cafe was closed those
+            // days and the underlying numbers came from Apr 29 - May 1.
+            const dateLabel = it.measuredStart === it.measuredEnd
+              ? fmtDay(it.measuredStart)
+              : `${fmtDay(it.measuredStart)} – ${fmtDay(it.measuredEnd)}`;
             return (
               <div
                 key={it.event.key}
@@ -185,6 +224,11 @@ const SpecialDaysImpact = ({ dailyRevenue, startDate, endDate }) => {
                     <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
                       {it.event.blurb}
                     </p>
+                    {it.wasMostlyClosed && (
+                      <p className="text-xs text-amber-700 dark:text-amber-300 mt-1.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded px-2 py-1">
+                        ⚠ Cafe was closed for {it.eventDaysExpected - it.eventDaysWithData} of {it.eventDaysExpected} event days. The number on the right reflects the lead-up period only — not the holiday itself.
+                      </p>
+                    )}
                   </div>
                   <div className="text-right flex-shrink-0">
                     <div className={`text-lg font-bold ${positive
