@@ -133,12 +133,17 @@ const Sidebar = ({ isOpen, onToggle }) => {
               <div className="flex flex-col">
                 <span className="text-sm font-medium text-gray-900 dark:text-white">{user?.name || 'Guest'}</span>
                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                  {/* Show the sub-user's permission (Viewer / Cashier /
-                      Full access) instead of the generic "Cashier" role
-                      label, so the user can see what each sub-user is
-                      allowed to do at a glance. */}
+                  {/* Show the sub-user's permission as a capability
+                      phrase ("Can view reports" / "Can upload data" /
+                      "Can view and upload") instead of a job-title
+                      label. For managers/admins, fall back to the
+                      role string. */}
                   {user?.role === 'Cashier'
-                    ? ({ read_only: 'Viewer', write_only: 'Cashier', read_write: 'Full access' }[user?.permission] || 'Sub-user')
+                    ? ({
+                        read_only:  'Can view reports',
+                        write_only: 'Can upload data',
+                        read_write: 'Can view and upload',
+                      }[user?.permission] || 'Sub-user')
                     : (user?.role || 'Unknown')}
                 </span>
               </div>

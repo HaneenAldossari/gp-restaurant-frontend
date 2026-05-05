@@ -7,25 +7,28 @@ import {
   deleteSubUser,
 } from '../lib/api';
 
-// Permission labels reworded to be manager-friendly. The backend
-// stores the technical names (read_only / write_only / read_write)
-// per the schema; we only translate at the UI layer.
+// Permission labels phrased as capabilities ("Can view reports", "Can
+// upload data", "Can view and upload") so the UI describes what each
+// level lets the sub-user DO, instead of imposing a job title like
+// "Viewer" or "Cashier". The backend still stores the technical names
+// (read_only / write_only / read_write) per the schema; we only
+// translate at the UI layer.
 const PERMISSIONS = [
   {
     value: 'read_only',
-    label: 'Viewer',
-    short: 'Sees reports only',
+    label: 'Can view reports',
+    short: 'View only',
     desc: 'Can open Dashboard, Forecasting, and Menu Insights. Cannot upload data or change settings.',
   },
   {
     value: 'write_only',
-    label: 'Cashier',
-    short: 'Uploads data only',
+    label: 'Can upload data',
+    short: 'Upload only',
     desc: 'Can upload sales files. Cannot see Dashboard, Forecasting, or Menu Insights — useful for staff who only enter end-of-day data.',
   },
   {
     value: 'read_write',
-    label: 'Full access',
+    label: 'Can view and upload',
     short: 'View & upload',
     desc: 'Same view as a manager — Dashboard, Forecasting, Menu Insights, and Upload. Cannot create other sub-users.',
   },

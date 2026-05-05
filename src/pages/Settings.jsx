@@ -206,10 +206,16 @@ const Settings = () => {
     }
   };
 
-  // Friendly permission label for sub-users (we hide the technical
-  // read_only / write_only / read_write strings from the UI).
+  // Capability-phrase label for sub-users — describes what they CAN
+  // do rather than imposing a job title. The technical strings
+  // (read_only / write_only / read_write) stay in the API; only the
+  // display layer is translated.
   const permissionLabel = user?.permission
-    ? ({ read_only: 'Viewer', write_only: 'Cashier', read_write: 'Full access' }[user.permission] || user.permission)
+    ? ({
+        read_only:  'Can view reports',
+        write_only: 'Can upload data',
+        read_write: 'Can view and upload',
+      }[user.permission] || user.permission)
     : null;
 
   return (
