@@ -74,7 +74,11 @@ const MenuEngineering = () => {
 
   const hasChange = priceDelta !== 0 || costDelta !== 0;
 
-  // Verdict rules.
+  // Verdict rules. Operates only on price changes within ±25% of the
+  // current price (the slider is clamped to that range — see the price
+  // slider's min/max in the JSX below). Constant-elasticity is a local
+  // approximation; beyond ±25% it extrapolates and the verdict logic
+  // would mislead the manager.
   //
   // For Dog (Underperformer) and Puzzle (Hidden gem), the pure constant-
   // elasticity profit model is misleading in BOTH directions:
@@ -87,24 +91,11 @@ const MenuEngineering = () => {
   //    or replace. Short-term profit sacrifice is the cost of finding
   //    out whether the item can be saved. → good (aligned with strategy).
   //
-  //   unrealistic → price moved more than ±25% from current. Constant-
-  //                 elasticity is a LOCAL approximation, valid only for
-  //                 small perturbations around the historically observed
-  //                 price. Extreme moves (e.g. cutting price in half)
-  //                 produce mathematically valid but commercially
-  //                 impossible projections — a 48% discount on an item
-  //                 priced 21 SAR would not actually triple sales the
-  //                 way a -1.8 elasticity coefficient predicts.
-  //   good        → profit goes up and fewer than 15% of customers walk
-  //                 away, OR a price cut on a Dog/Puzzle (strategic test)
-  //   risky       → profit goes up but more than 15% fewer customers
-  //   bad         → profit goes down, OR a price raise on a Dog/Puzzle
-  function verdictFor(currentQty, newQty, currentProfit, newProfit, priceWentUp, priceWentDown, classification, priceChangePct) {
-    // Sanity bound BEFORE any other rule. Reviewer-flagged: a -48%
-    // price move on Banana Split Waffle was reading as "good idea,
-    // aligned with strategy" because the elasticity model said qty
-    // would triple. That's extrapolation, not prediction. Block it.
-    if (Math.abs(priceChangePct) > 25) return 'unrealistic';
+  //   good    → profit goes up and fewer than 15% of customers walk away,
+  //             OR a price cut on a Dog/Puzzle (strategic test)
+  //   risky   → profit goes up but more than 15% fewer customers
+  //   bad     → profit goes down, OR a price raise on a Dog/Puzzle
+  function verdictFor(currentQty, newQty, currentProfit, newProfit, priceWentUp, priceWentDown, classification) {
     const isDogOrPuzzle = classification === 'Dog' || classification === 'Puzzle';
     if (priceWentUp && isDogOrPuzzle) return 'bad';
     if (priceWentDown && isDogOrPuzzle) return 'good';
@@ -595,7 +586,13 @@ const MenuEngineering = () => {
 
             {/* Sliders */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Price slider */}
+              {/* Price slider — bounded to ±25% of current price.
+                  The constant-elasticity demand model is only trustworthy
+                  for small perturbations around the historical price;
+                  beyond ±25% the projected qty/profit numbers are
+                  extrapolation, not prediction. Hard-clamping the slider
+                  is cleaner UX than letting it roam and then showing a
+                  warning. */}
               <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-700/50">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs text-gray-500 dark:text-gray-400">Current Price: SAR {Math.round(targetItem.price)}</span>
@@ -605,14 +602,17 @@ const MenuEngineering = () => {
                 </div>
                 <input
                   type="range"
-                  min={-Math.floor(targetItem.price * 0.5)}
-                  max={Math.ceil(targetItem.price * 1)}
+                  min={-Math.floor(targetItem.price * 0.25)}
+                  max={Math.ceil(targetItem.price * 0.25)}
                   step={1}
                   value={priceDelta}
                   onChange={(e) => setPriceDelta(Number(e.target.value))}
                   className="w-full accent-primary-600"
                 />
-                <p className="text-[10px] text-gray-400 mt-1">Try a different selling price.</p>
+                <div className="flex items-center justify-between mt-1 text-[10px] text-gray-400">
+                  <span>Min: SAR {Math.round(targetItem.price * 0.75)}</span>
+                  <span>Max: SAR {Math.round(targetItem.price * 1.25)}</span>
+                </div>
               </div>
 
               {/* Cost slider */}
@@ -655,15 +655,7 @@ const MenuEngineering = () => {
               const priceWentUp = priceDelta > 0;
               const priceWentDown = priceDelta < 0;
               const itemClass = targetItem?.classification;
-              // Percentage change relative to current price — drives the
-              // "extrapolation guard" inside verdictFor. Beyond ±25% the
-              // constant-elasticity model is in territory where its
-              // coefficient (estimated on small historical price moves)
-              // is no longer trustworthy and we should warn the manager.
-              const priceChangePct = targetItem?.price > 0
-                ? (priceDelta / targetItem.price) * 100
-                : 0;
-              const verdict = verdictFor(currQty, newQty, sim.current.profit, sim.simulated.newProfit, priceWentUp, priceWentDown, itemClass, priceChangePct);
+              const verdict = verdictFor(currQty, newQty, sim.current.profit, sim.simulated.newProfit, priceWentUp, priceWentDown, itemClass);
 
               // Tailored body text for the two Dog/Puzzle cases where the
               // verdict overrides the pure profit math.
@@ -680,21 +672,10 @@ const MenuEngineering = () => {
               if (priceWentDown && isDogOrPuzzle) goodBody = dogPuzzleDiscountBody;
               if (priceWentUp && isDogOrPuzzle)   badBody = dogPuzzleRaiseBody;
 
-              // Body for the extrapolation case — explains why we won't
-              // greenlight an extreme price change even when the model's
-              // math says profit goes up.
-              const direction = priceWentDown ? 'cut' : 'raise';
-              const extrapolationBody = (
-                `That's a ${Math.abs(Math.round(priceChangePct))}% ${direction} — too far from the historical price for the model to predict reliably. ` +
-                `Price elasticity was estimated on smaller real-world price moves; at this magnitude the projected demand change is extrapolation, not a forecast. ` +
-                `Try a change within ±25% (currently SAR ${Math.round(targetItem.price * 0.75)} – ${Math.round(targetItem.price * 1.25)}).`
-              );
-
               const verdictStyles = {
-                good:         { bg: 'bg-success-50 dark:bg-success-900/20', border: 'border-success-200 dark:border-success-800', text: 'text-success-700 dark:text-success-300', title: 'Good idea',          Icon: CheckCircle2,  body: goodBody },
-                risky:        { bg: 'bg-amber-50 dark:bg-amber-900/20',     border: 'border-amber-200 dark:border-amber-800',     text: 'text-amber-700 dark:text-amber-300',    title: 'Risky',              Icon: AlertTriangle, body: 'Profit up, but you lose noticeable demand. Monitor closely.' },
-                bad:          { bg: 'bg-danger-50 dark:bg-danger-900/20',   border: 'border-danger-200 dark:border-danger-800',   text: 'text-danger-700 dark:text-danger-300',  title: 'Not recommended',    Icon: ThumbsDown,    body: badBody },
-                unrealistic:  { bg: 'bg-danger-50 dark:bg-danger-900/20',   border: 'border-danger-200 dark:border-danger-800',   text: 'text-danger-700 dark:text-danger-300',  title: 'Outside reliable range', Icon: AlertTriangle, body: extrapolationBody },
+                good:  { bg: 'bg-success-50 dark:bg-success-900/20', border: 'border-success-200 dark:border-success-800', text: 'text-success-700 dark:text-success-300', title: 'Good idea',       Icon: CheckCircle2,  body: goodBody },
+                risky: { bg: 'bg-amber-50 dark:bg-amber-900/20',     border: 'border-amber-200 dark:border-amber-800',     text: 'text-amber-700 dark:text-amber-300',    title: 'Risky',           Icon: AlertTriangle, body: 'Profit up, but you lose noticeable demand. Monitor closely.' },
+                bad:   { bg: 'bg-danger-50 dark:bg-danger-900/20',   border: 'border-danger-200 dark:border-danger-800',   text: 'text-danger-700 dark:text-danger-300',  title: 'Not recommended', Icon: ThumbsDown,    body: badBody },
               }[verdict];
               const VerdictIcon = verdictStyles.Icon;
 
