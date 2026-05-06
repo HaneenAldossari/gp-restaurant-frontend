@@ -544,18 +544,28 @@ const MenuEngineering = () => {
               const priceFlips = op.currentClassification !== op.newClassification;
               const costFlipsAlone = !!cl?.flipsAtCurrentPrice;
 
-              // Primary lever rules:
-              //   • If the price suggestion is 'hold', cost is the
-              //     only useful single lever — lead with cost.
-              //   • If cost-only flips classification AND lifts more
-              //     profit than the price suggestion, lead with cost
-              //     (this is the Plowhorse → Star case the reviewer
-              //     flagged on Double Chocolate Waffle).
-              //   • Otherwise lead with price (current behavior).
-              const primaryLever = (cl && (
-                sameAsCurrent ||
-                (costFlipsAlone && costLift > priceLift)
-              )) ? 'cost' : 'price';
+              // Primary lever = whichever single move delivers the
+              // bigger profit lift. The earlier rule also required the
+              // cost move to flip classification, which silently hid
+              // cost as the right answer for Stars and healthy Puzzles
+              // — items already on the high-margin side, where cost
+              // can't move them further up the matrix but a 2–10×
+              // bigger SAR/yr lift is still on the table. Tie-break
+              // on classification flip (cost > price > none) when the
+              // two lifts are within 5% / SAR 50.
+              const TIE_PCT = 0.05;
+              const TIE_ABS = 50;
+              const tied = cl && Math.abs(costLift - priceLift) <= Math.max(TIE_ABS, TIE_PCT * Math.max(costLift, priceLift));
+              let primaryLever;
+              if (!cl) {
+                primaryLever = 'price';
+              } else if (sameAsCurrent) {
+                primaryLever = 'cost';
+              } else if (tied) {
+                primaryLever = costFlipsAlone ? 'cost' : (priceFlips ? 'price' : (costLift >= priceLift ? 'cost' : 'price'));
+              } else {
+                primaryLever = costLift > priceLift ? 'cost' : 'price';
+              }
 
               const dirStyle = {
                 raise: { tag: 'Raise the price', tagBg: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300', arrow: '↑' },
