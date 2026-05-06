@@ -598,28 +598,38 @@ const MenuEngineering = () => {
                       it reads naturally in all three cases. */}
                   {op.costLowering && (() => {
                     const cl = op.costLowering;
-                    const lead = direction === 'raise'
-                      ? 'Also try lowering the cost'
-                      : direction === 'lower'
-                      ? 'Or try lowering the cost'
-                      : 'Also try lowering the cost';
-                    const movesTo = cl.movesClassification && cl.newClassification
+                    const flipsAtCurrent = cl.flipsAtCurrentPrice;
+                    const flipsCombined = cl.movesClassification;
+                    const movesTo = (flipsAtCurrent || flipsCombined) && cl.newClassification
                       ? getClassification(cl.newClassification)
                       : null;
+                    const movesToAtCurrent = flipsAtCurrent && cl.classificationAtCurrentPrice
+                      ? getClassification(cl.classificationAtCurrentPrice)
+                      : null;
                     return (
-                      <div className="mt-3 pt-3 border-t border-primary-200 dark:border-primary-800/50 text-xs text-gray-700 dark:text-gray-300 leading-relaxed">
-                        <span className="font-semibold text-emerald-700 dark:text-emerald-400">💰 {lead}:</span>{' '}
-                        bring unit cost down to <span className="font-semibold">SAR {cl.suggestedCost}</span> (↓{cl.reductionPct}% from SAR {Math.round(cl.currentCost)})
-                        {' '}— that lifts profit by about <span className="font-semibold">SAR {Math.round(cl.additionalProfit)}/year</span> without changing demand.
-                        {movesTo && (
-                          <span className="block mt-1.5">
-                            <span className="font-semibold text-emerald-700 dark:text-emerald-400">🚀 Best-case:</span>{' '}
-                            with both the price and cost moves applied, the item moves up to{' '}
+                      <div className="mt-3 pt-3 border-t border-primary-200 dark:border-primary-800/50 text-xs text-gray-700 dark:text-gray-300 leading-relaxed space-y-1.5">
+                        <div>
+                          <span className="font-semibold text-emerald-700 dark:text-emerald-400">💰 Cost lever:</span>{' '}
+                          bring unit cost down to <span className="font-semibold">SAR {cl.suggestedCost}</span> (↓{cl.reductionPct}% from SAR {Math.round(cl.currentCost)})
+                          {' '}— lifts profit by about <span className="font-semibold">SAR {Math.round(cl.additionalProfit)}/year</span> without changing demand.
+                        </div>
+                        {flipsAtCurrent && movesToAtCurrent && (
+                          <div className="rounded bg-emerald-100/60 dark:bg-emerald-900/30 px-2 py-1 text-emerald-800 dark:text-emerald-200">
+                            ⭐ <span className="font-semibold">Cost reduction alone is enough</span> to move this item to{' '}
+                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${movesToAtCurrent.bg} ${movesToAtCurrent.text} border ${movesToAtCurrent.border}`}>
+                              {movesToAtCurrent.emoji} {movesToAtCurrent.label}
+                            </span>
+                            {' '}— even without changing the price.
+                          </div>
+                        )}
+                        {flipsCombined && !flipsAtCurrent && movesTo && (
+                          <div className="rounded bg-emerald-100/60 dark:bg-emerald-900/30 px-2 py-1 text-emerald-800 dark:text-emerald-200">
+                            🚀 With BOTH the price and cost moves applied, the item moves up to{' '}
                             <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${movesTo.bg} ${movesTo.text} border ${movesTo.border}`}>
                               {movesTo.emoji} {movesTo.label}
                             </span>
                             .
-                          </span>
+                          </div>
                         )}
                       </div>
                     );
