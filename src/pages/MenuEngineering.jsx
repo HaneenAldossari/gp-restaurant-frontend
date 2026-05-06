@@ -64,7 +64,16 @@ const MenuEngineering = () => {
     let alive = true;
     setSimLoading(true);
     const newPrice = Math.max(0.01, targetItem.price + priceDelta);
-    const newCost = costDelta !== 0 ? Math.max(0, targetItem.cost + costDelta) : null;
+    // Snap to half-rial grid so the slider can land EXACTLY on the
+    // engine's suggestion (e.g., SAR 5.00) even when the item's raw
+    // cost is fractional (e.g., 12.34). Without snapping, every
+    // achievable cost is `12.34 + n*0.5` and never hits a clean
+    // half-rial value the suggestion engine produces. Sub-1-SAR items
+    // skip the snap — their costs are inherently fractional.
+    const rawNewCost = costDelta !== 0 ? Math.max(0, targetItem.cost + costDelta) : null;
+    const newCost = rawNewCost === null
+      ? null
+      : (targetItem.cost < 1 ? rawNewCost : Math.round(rawNewCost * 2) / 2);
     simulateWhatIf({ target: targetItem.name, newPrice, newCost })
       .then((s) => { if (alive) setSim(s); })
       .catch(() => { if (alive) setSim(null); })
@@ -80,13 +89,20 @@ const MenuEngineering = () => {
   // round to integer for cleaner display.
   const fmtCost = (v) => {
     const x = Number(v) || 0;
-    return x > 0 && x < 1 ? x.toFixed(2) : Math.round(x).toString();
+    if (x > 0 && x < 1) return x.toFixed(2);
+    // Half-rial steps from the cost-suggestion engine: render with 2
+    // decimals when the value isn't a whole number ("SAR 1.50") so the
+    // half-rial precision survives the display layer.
+    if (Math.abs(x - Math.round(x)) > 0.01) return x.toFixed(2);
+    return Math.round(x).toString();
   };
 
-  // Cost slider granularity — step in 0.05 SAR for sub-1-SAR items
-  // so the user can actually move the slider, otherwise step=1 SAR
-  // would jump from 0.06 → 1.06 (17× the cost) on a single tick.
-  const costStep = (targetItem?.cost ?? 0) < 1 ? 0.05 : 1;
+  // Cost slider granularity — sub-1-SAR items step in 0.05 (otherwise
+  // a 1-SAR jump on a 0.06-SAR cost is meaningless), and rial-scale
+  // items step in 0.5 to match the half-rial precision the cost
+  // suggestion engine now produces. Whole-rial steps were too coarse:
+  // a 14.50-SAR cost couldn't even be moved to 13.50.
+  const costStep = (targetItem?.cost ?? 0) < 1 ? 0.05 : 0.5;
   const costMin = (targetItem?.cost ?? 0) < 1
     ? -(targetItem?.cost ?? 0)            // can't go below SAR 0
     : -Math.floor((targetItem?.cost ?? 0) * 1);
@@ -603,7 +619,7 @@ const MenuEngineering = () => {
                   {/* Big-number headline — primary lever */}
                   {primaryLever === 'cost' && cl ? (
                     <p className="text-4xl font-bold text-primary-900 dark:text-primary-100 mt-1">
-                      Cost → SAR {cl.suggestedCost}
+                      Cost → SAR {fmtCost(cl.suggestedCost)}
                       <span className="text-sm font-normal text-primary-700 dark:text-primary-300 ml-2">
                         (was SAR {fmtCost(cl.currentCost)})
                       </span>
@@ -680,12 +696,17 @@ const MenuEngineering = () => {
                       additive-profit option. When primary=cost, this
                       shows the price option. When primary=price, this
                       shows the cost option (existing behavior). */}
-                  {primaryLever === 'cost' && !sameAsCurrent && (
+                  {primaryLever === 'cost' && !sameAsCurrent && priceLift > 0 && (
                     <div className="mt-3 pt-3 border-t border-primary-200 dark:border-primary-800/50 text-xs text-gray-700 dark:text-gray-300 leading-relaxed">
                       <span className="font-semibold text-primary-700 dark:text-primary-300">↕ For more profit:</span>{' '}
-                      you can also move the price to <span className="font-semibold">SAR {suggestedInt}</span>{' '}
-                      (≈ {changePct > 0 ? '+' : ''}{changePct}% from SAR {currentPriceInt}) — that adds about
+                      you can also <span className="font-semibold">{direction === 'raise' ? 'raise' : 'lower'} the price to SAR {suggestedInt}</span>{' '}
+                      ({changePct > 0 ? '+' : ''}{changePct}% from SAR {currentPriceInt}) — that adds about
                       {' '}<span className="font-semibold">SAR {Math.round(priceLift)}/year</span> on top of the cost saving.
+                      {direction === 'lower' && (
+                        <span className="block mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                          Lowering the price drives more units sold; for elastic items the extra demand outweighs the smaller margin per unit.
+                        </span>
+                      )}
                     </div>
                   )}
                   {primaryLever === 'price' && cl && (() => {
@@ -699,7 +720,7 @@ const MenuEngineering = () => {
                       <div className="mt-3 pt-3 border-t border-primary-200 dark:border-primary-800/50 text-xs text-gray-700 dark:text-gray-300 leading-relaxed space-y-1.5">
                         <div>
                           <span className="font-semibold text-emerald-700 dark:text-emerald-400">💰 Cost lever:</span>{' '}
-                          bring unit cost down to <span className="font-semibold">SAR {cl.suggestedCost}</span> (↓{cl.reductionPct}% from SAR {fmtCost(cl.currentCost)})
+                          bring unit cost down to <span className="font-semibold">SAR {fmtCost(cl.suggestedCost)}</span> (↓{cl.reductionPct}% from SAR {fmtCost(cl.currentCost)})
                           {' '}— lifts profit by about <span className="font-semibold">SAR {Math.round(costLift)}/year</span> without changing demand.
                         </div>
                         {movesToAtCurrent && (
@@ -765,7 +786,13 @@ const MenuEngineering = () => {
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs text-gray-500 dark:text-gray-400">Current Cost: SAR {fmtCost(targetItem.cost)}</span>
                   <span className="text-sm font-bold text-accent-600 dark:text-accent-400">
-                    New: SAR {fmtCost(Math.max(0, targetItem.cost + costDelta))}
+                    New: SAR {fmtCost(
+                      costDelta === 0
+                        ? targetItem.cost
+                        : (targetItem.cost < 1
+                            ? Math.max(0, targetItem.cost + costDelta)
+                            : Math.round(Math.max(0, targetItem.cost + costDelta) * 2) / 2)
+                    )}
                   </span>
                 </div>
                 <input
