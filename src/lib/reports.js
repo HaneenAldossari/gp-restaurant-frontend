@@ -84,6 +84,142 @@ export const downloadCsv = (report, filename) => {
   URL.revokeObjectURL(url);
 };
 
+// ── Excel-compatible spreadsheet (HTML-as-XLS) ──────────────────────
+//
+// Background: tester (Noura) flagged that the CSV export opens in
+// Excel with the sheet flipped right-to-left and product names
+// truncated. Root cause is Excel's locale heuristic — when the host
+// machine is configured with Arabic locale, every CSV opens in RTL
+// view by default, regardless of the file's content. Pure CSV gives
+// us no place to override that setting.
+//
+// Fix: emit an HTML table the file extension `.xls` and the
+// `application/vnd.ms-excel` MIME type. Excel happily opens HTML as
+// a worksheet, AND it honours an Office-specific MS XML directive
+// `<x:DisplayRightToLeft>False</x:DisplayRightToLeft>` that hard-
+// overrides the Arabic-locale RTL flip. Column widths can also be
+// specified inline in <col>, fixing the truncation. No new
+// dependency required.
+const buildExcelHtml = (report) => {
+  const today = new Date();
+  const ts = today.toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+
+  // Generous default widths; product-name columns get the widest cells.
+  const colWidth = (col) => {
+    const c = String(col).toLowerCase();
+    if (c.includes('product') || c.includes('item') || c.includes('name'))
+      return 280;
+    if (c.includes('category')) return 180;
+    if (c.includes('what to do') || c.includes('action') ||
+        c.includes('rationale') || c.includes('advice'))
+      return 320;
+    if (c.includes('date')) return 140;
+    return 110;
+  };
+
+  const renderSection = (section) => {
+    if (section.kind === 'kv') {
+      return `
+        <h3>${escapeHtml(section.name)}</h3>
+        <table dir="ltr">
+          <colgroup><col style="width:200px"/><col style="width:240px"/></colgroup>
+          <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+          <tbody>
+            ${section.rows.map(([k, v]) =>
+              `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`
+            ).join('')}
+          </tbody>
+        </table>`;
+    }
+    const colTags = (section.columns || []).map((c) =>
+      `<col style="width:${colWidth(c)}px"/>`
+    ).join('');
+    return `
+      <h3>${escapeHtml(section.name)}</h3>
+      <table dir="ltr">
+        <colgroup>${colTags}</colgroup>
+        <thead>
+          <tr>${(section.columns || []).map((c) =>
+            `<th>${escapeHtml(c)}</th>`
+          ).join('')}</tr>
+        </thead>
+        <tbody>
+          ${(section.rows || []).map((r) => `
+            <tr>${r.map((cell) =>
+              `<td>${escapeHtml(cell)}</td>`
+            ).join('')}</tr>
+          `).join('')}
+        </tbody>
+        ${section.totals ? `
+          <tfoot>
+            <tr>${section.totals.map((cell) =>
+              `<th>${escapeHtml(cell)}</th>`
+            ).join('')}</tr>
+          </tfoot>` : ''}
+      </table>`;
+  };
+
+  return `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:x="urn:schemas-microsoft-com:office:excel"
+      xmlns="http://www.w3.org/TR/REC-html40" dir="ltr">
+<head>
+  <meta charset="utf-8"/>
+  <title>${escapeHtml(report.title)}</title>
+  <!--[if gte mso 9]>
+  <xml>
+    <x:ExcelWorkbook>
+      <x:ExcelWorksheets>
+        <x:ExcelWorksheet>
+          <x:Name>Report</x:Name>
+          <x:WorksheetOptions>
+            <x:DisplayRightToLeft>False</x:DisplayRightToLeft>
+            <x:DefaultColWidth>14</x:DefaultColWidth>
+          </x:WorksheetOptions>
+        </x:ExcelWorksheet>
+      </x:ExcelWorksheets>
+    </x:ExcelWorkbook>
+  </xml>
+  <![endif]-->
+  <style>
+    body { font-family: Arial, sans-serif; direction: ltr; }
+    h2 { font-size: 14pt; margin: 0 0 4px 0; }
+    h3 { font-size: 12pt; margin: 18px 0 4px 0; }
+    table { border-collapse: collapse; direction: ltr; }
+    th, td { border: 1px solid #b0b0b0; padding: 4px 8px; text-align: left; vertical-align: top; }
+    th { background: #f3f4f6; font-weight: bold; }
+    tfoot th { background: #e5e7eb; }
+    .meta { color: #555; font-size: 10pt; margin-bottom: 12px; }
+  </style>
+</head>
+<body dir="ltr">
+  <h2>${escapeHtml(report.title)}${report.subtitle ? ' — ' + escapeHtml(report.subtitle) : ''}</h2>
+  <div class="meta">
+    ${PROJECT_NAME} · ${ORG_NAME}<br/>
+    Generated: ${escapeHtml(ts)}
+    ${(report.meta || []).map((m) =>
+      `<br/>${escapeHtml(m.label)}: ${escapeHtml(m.value)}`
+    ).join('')}
+  </div>
+  ${(report.sections || []).map(renderSection).join('\n')}
+</body>
+</html>`;
+};
+
+export const downloadExcel = (report, filename) => {
+  const html = buildExcelHtml(report);
+  const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
 // ── Printable HTML report ───────────────────────────────────────────
 
 const escapeHtml = (s) => String(s ?? '')

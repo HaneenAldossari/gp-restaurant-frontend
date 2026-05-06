@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Download, FileText, FileSpreadsheet, ChevronDown } from 'lucide-react';
-import { downloadCsv, openPrintableReport } from '../../lib/reports';
+import { downloadExcel, openPrintableReport } from '../../lib/reports';
 
 // Drop-in export button used at the top-right of each page. The caller
 // passes a function `buildReport()` that returns the {title, meta,
@@ -22,12 +22,16 @@ const ExportMenu = ({ buildReport, baseFilename, disabled }) => {
   }, [open]);
 
   const today = new Date().toISOString().slice(0, 10);
-  const csvName = `${baseFilename || 'report'}-${today}.csv`;
+  // .xls (HTML-as-XLS) instead of .csv — Excel reads it as a native
+  // spreadsheet and honours the embedded directive that overrides
+  // its locale-driven RTL flip. CSV exports were unusable for the
+  // tester whose Excel was set to Arabic locale.
+  const xlsName = `${baseFilename || 'report'}-${today}.xls`;
 
   const handleCsv = () => {
     const r = buildReport();
     if (!r) return;
-    downloadCsv(r, csvName);
+    downloadExcel(r, xlsName);
     setOpen(false);
   };
 
@@ -82,9 +86,9 @@ const ExportMenu = ({ buildReport, baseFilename, disabled }) => {
           >
             <FileSpreadsheet className="w-4 h-4 mt-0.5 text-emerald-500 shrink-0" />
             <div>
-              <div className="text-sm font-medium text-gray-900 dark:text-white">CSV Spreadsheet</div>
+              <div className="text-sm font-medium text-gray-900 dark:text-white">Excel Spreadsheet</div>
               <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Sectioned CSV with totals — opens cleanly in Excel.
+                Sectioned report with totals — opens left-to-right with proper column widths.
               </div>
             </div>
           </button>
