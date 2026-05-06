@@ -662,8 +662,12 @@ const MenuEngineering = () => {
               </div>
             </div>
 
-            {/* What will happen — only when a slider has moved */}
-            {sim && hasChange && (() => {
+            {/* Simulator panel — shown at zero-change too, so the
+                manager can see current units sold, current per-unit
+                profit, and total profit baseline without having to
+                slide. Verdict box only appears once a slider moves
+                (no judgment to make on "no change"). */}
+            {sim && (() => {
               const newQty = sim.simulated.projectedQty;
               const currQty = sim.current.qtySold;
               const profitDiff = Math.round(sim.simulated.newProfit - sim.current.profit);
@@ -814,13 +818,17 @@ const MenuEngineering = () => {
                     </div>
                   </div>
 
-                  <div className={`rounded-lg p-3 text-sm border flex items-start gap-2 ${verdictStyles.bg} ${verdictStyles.border} ${verdictStyles.text}`}>
-                    <VerdictIcon size={16} className="flex-shrink-0 mt-0.5" />
-                    <div>
-                      <span className="font-semibold">{verdictStyles.title}.</span>{' '}
-                      <span className="opacity-90">{verdictStyles.body}</span>
+                  {/* Verdict box only when a slider has moved — there's
+                      no good/bad call to make on "current state". */}
+                  {hasChange && (
+                    <div className={`rounded-lg p-3 text-sm border flex items-start gap-2 ${verdictStyles.bg} ${verdictStyles.border} ${verdictStyles.text}`}>
+                      <VerdictIcon size={16} className="flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-semibold">{verdictStyles.title}.</span>{' '}
+                        <span className="opacity-90">{verdictStyles.body}</span>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Cost-lowering reminder — only when BOTH:
                         • the user has moved the slider UP (priceWentUp), AND
