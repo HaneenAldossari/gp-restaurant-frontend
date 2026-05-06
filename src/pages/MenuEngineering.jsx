@@ -74,6 +74,26 @@ const MenuEngineering = () => {
 
   const hasChange = priceDelta !== 0 || costDelta !== 0;
 
+  // Cost formatter — sub-1-SAR items show 2 decimals so the cafe
+  // doesn't see "SAR 0" for a SAR 0.06 tea bag (real cost data has
+  // ingredient-only costs that round to 0). Items at SAR 1 or above
+  // round to integer for cleaner display.
+  const fmtCost = (v) => {
+    const x = Number(v) || 0;
+    return x > 0 && x < 1 ? x.toFixed(2) : Math.round(x).toString();
+  };
+
+  // Cost slider granularity — step in 0.05 SAR for sub-1-SAR items
+  // so the user can actually move the slider, otherwise step=1 SAR
+  // would jump from 0.06 → 1.06 (17× the cost) on a single tick.
+  const costStep = (targetItem?.cost ?? 0) < 1 ? 0.05 : 1;
+  const costMin = (targetItem?.cost ?? 0) < 1
+    ? -(targetItem?.cost ?? 0)            // can't go below SAR 0
+    : -Math.floor((targetItem?.cost ?? 0) * 1);
+  const costMax = (targetItem?.cost ?? 0) < 1
+    ? Math.max(2, (targetItem?.cost ?? 0)) // allow up to SAR 2 to test "include cup/overhead" scenarios
+    : Math.ceil((targetItem?.cost ?? 0) * 2);
+
   // Verdict rules. Operates only on price changes within ±25% of the
   // current price (the slider is clamped to that range — see the price
   // slider's min/max in the JSX below).
@@ -575,7 +595,7 @@ const MenuEngineering = () => {
                     <p className="text-4xl font-bold text-primary-900 dark:text-primary-100 mt-1">
                       Cost → SAR {cl.suggestedCost}
                       <span className="text-sm font-normal text-primary-700 dark:text-primary-300 ml-2">
-                        (was SAR {Math.round(cl.currentCost)})
+                        (was SAR {fmtCost(cl.currentCost)})
                       </span>
                     </p>
                   ) : sameAsCurrent ? (
@@ -669,7 +689,7 @@ const MenuEngineering = () => {
                       <div className="mt-3 pt-3 border-t border-primary-200 dark:border-primary-800/50 text-xs text-gray-700 dark:text-gray-300 leading-relaxed space-y-1.5">
                         <div>
                           <span className="font-semibold text-emerald-700 dark:text-emerald-400">💰 Cost lever:</span>{' '}
-                          bring unit cost down to <span className="font-semibold">SAR {cl.suggestedCost}</span> (↓{cl.reductionPct}% from SAR {Math.round(cl.currentCost)})
+                          bring unit cost down to <span className="font-semibold">SAR {cl.suggestedCost}</span> (↓{cl.reductionPct}% from SAR {fmtCost(cl.currentCost)})
                           {' '}— lifts profit by about <span className="font-semibold">SAR {Math.round(costLift)}/year</span> without changing demand.
                         </div>
                         {movesToAtCurrent && (
@@ -728,19 +748,21 @@ const MenuEngineering = () => {
                 </div>
               </div>
 
-              {/* Cost slider */}
+              {/* Cost slider — adaptive step so sub-1-SAR items
+                  (tea bags, basic ingredients) can move in 0.05 SAR
+                  ticks instead of jumping a whole 1 SAR per tick. */}
               <div className="p-4 rounded-lg bg-gray-50 dark:bg-gray-700/50">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs text-gray-500 dark:text-gray-400">Current Cost: SAR {Math.round(targetItem.cost)}</span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">Current Cost: SAR {fmtCost(targetItem.cost)}</span>
                   <span className="text-sm font-bold text-accent-600 dark:text-accent-400">
-                    New: SAR {Math.round(Math.max(0, targetItem.cost + costDelta))}
+                    New: SAR {fmtCost(Math.max(0, targetItem.cost + costDelta))}
                   </span>
                 </div>
                 <input
                   type="range"
-                  min={-Math.floor(targetItem.cost * 1)}
-                  max={Math.ceil(targetItem.cost * 2)}
-                  step={1}
+                  min={costMin}
+                  max={costMax}
+                  step={costStep}
                   value={costDelta}
                   onChange={(e) => setCostDelta(Number(e.target.value))}
                   className="w-full accent-accent-600"
