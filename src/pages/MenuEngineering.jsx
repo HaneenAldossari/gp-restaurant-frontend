@@ -616,6 +616,22 @@ const MenuEngineering = () => {
                     )}
                   </div>
 
+                  {/* Current state — shown inline above the suggested
+                      move so the manager has anchor numbers right next
+                      to the recommendation. The slider section still
+                      shows them too; this duplicates intentionally
+                      because the gray slider labels were too quiet. */}
+                  <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs text-primary-700 dark:text-primary-300">
+                    <span>
+                      <span className="opacity-70">Current price:</span>{' '}
+                      <span className="font-semibold text-primary-900 dark:text-primary-100">SAR {fmtCost(targetItem.price)}</span>
+                    </span>
+                    <span>
+                      <span className="opacity-70">Current cost:</span>{' '}
+                      <span className="font-semibold text-primary-900 dark:text-primary-100">SAR {fmtCost(targetItem.cost)}</span>
+                    </span>
+                  </div>
+
                   {/* Big-number headline — primary lever */}
                   {primaryLever === 'cost' && cl ? (
                     <p className="text-4xl font-bold text-primary-900 dark:text-primary-100 mt-1">
