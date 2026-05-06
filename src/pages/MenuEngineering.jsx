@@ -498,42 +498,87 @@ const MenuEngineering = () => {
               </button>
             </div>
 
-            {/* Hero suggestion card — the headline answer */}
+            {/* Hero suggestion card — picks the BEST single lever
+                (price or cost) to lead with, based on which one has
+                the bigger profit impact + classification flip. The
+                other lever is shown as a secondary option below. */}
             {sim?.recommendations?.optimalPrice && (() => {
               const op = sim.recommendations.optimalPrice;
+              const cl = op.costLowering;
               const currentPriceInt = Math.round(targetItem.price);
               const suggestedInt = op.price;
               const direction = op.direction || (suggestedInt > currentPriceInt ? 'raise' : suggestedInt < currentPriceInt ? 'lower' : 'hold');
               const sameAsCurrent = direction === 'hold';
               const changePct = op.priceChangePct;
-              const transitionChanged = op.currentClassification && op.newClassification && op.currentClassification !== op.newClassification;
               const fromClass = op.currentClassification ? getClassification(op.currentClassification) : null;
               const toClass = op.newClassification ? getClassification(op.newClassification) : null;
 
-              // Direction-aware styling so a "raise" reads green and a
-              // "lower" reads as a deliberate discount, not a warning.
+              // Profit lift from each lever, used to decide which is
+              // the primary recommendation:
+              //   priceLift = projected profit at suggested price - current profit
+              //   costLift  = additionalProfit from cl (already calibrated)
+              const priceLift = (op.projectedProfit != null && sim?.current?.profit != null)
+                ? op.projectedProfit - sim.current.profit
+                : 0;
+              const costLift = cl?.additionalProfit ?? 0;
+              const priceFlips = op.currentClassification !== op.newClassification;
+              const costFlipsAlone = !!cl?.flipsAtCurrentPrice;
+
+              // Primary lever rules:
+              //   • If the price suggestion is 'hold', cost is the
+              //     only useful single lever — lead with cost.
+              //   • If cost-only flips classification AND lifts more
+              //     profit than the price suggestion, lead with cost
+              //     (this is the Plowhorse → Star case the reviewer
+              //     flagged on Double Chocolate Waffle).
+              //   • Otherwise lead with price (current behavior).
+              const primaryLever = (cl && (
+                sameAsCurrent ||
+                (costFlipsAlone && costLift > priceLift)
+              )) ? 'cost' : 'price';
+
               const dirStyle = {
                 raise: { tag: 'Raise the price', tagBg: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300', arrow: '↑' },
-                lower: { tag: 'Lower the price', tagBg: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300',           arrow: '↓' },
-                hold:  { tag: 'Hold the price',  tagBg: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',          arrow: '=' },
+                lower: { tag: 'Lower the price', tagBg: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300',                  arrow: '↓' },
+                hold:  { tag: 'Hold the price',  tagBg: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',                 arrow: '=' },
               }[direction];
 
               return (
                 <div className="p-5 rounded-xl bg-gradient-to-br from-primary-50 to-primary-100 dark:from-primary-900/30 dark:to-primary-900/10 border border-primary-200 dark:border-primary-800">
+                  {/* Header — title + tag chip */}
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <p className="text-xs font-medium text-primary-700 dark:text-primary-300 uppercase tracking-wide flex items-center gap-1.5">
                       <Lightbulb size={13} className="text-amber-500" />
-                      Suggested price
+                      {primaryLever === 'cost' ? 'Suggested move' : 'Suggested price'}
                     </p>
-                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold ${dirStyle.tagBg}`}>
-                      <span className="text-sm leading-none">{dirStyle.arrow}</span>
-                      {op.directionLabel || dirStyle.tag}
-                      {changePct != null && !sameAsCurrent && (
-                        <span className="opacity-80">({changePct > 0 ? '+' : ''}{changePct}%)</span>
-                      )}
-                    </span>
+                    {primaryLever === 'cost' ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                        <span className="text-sm leading-none">↓</span>
+                        Lower the cost
+                        {cl?.reductionPct != null && (
+                          <span className="opacity-80">(−{cl.reductionPct}%)</span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold ${dirStyle.tagBg}`}>
+                        <span className="text-sm leading-none">{dirStyle.arrow}</span>
+                        {op.directionLabel || dirStyle.tag}
+                        {changePct != null && !sameAsCurrent && (
+                          <span className="opacity-80">({changePct > 0 ? '+' : ''}{changePct}%)</span>
+                        )}
+                      </span>
+                    )}
                   </div>
-                  {sameAsCurrent ? (
+
+                  {/* Big-number headline — primary lever */}
+                  {primaryLever === 'cost' && cl ? (
+                    <p className="text-4xl font-bold text-primary-900 dark:text-primary-100 mt-1">
+                      Cost → SAR {cl.suggestedCost}
+                      <span className="text-sm font-normal text-primary-700 dark:text-primary-300 ml-2">
+                        (was SAR {Math.round(cl.currentCost)})
+                      </span>
+                    </p>
+                  ) : sameAsCurrent ? (
                     <p className="text-2xl font-bold text-primary-900 dark:text-primary-100 mt-1">
                       Keep SAR {currentPriceInt}
                     </p>
@@ -546,12 +591,28 @@ const MenuEngineering = () => {
                     </p>
                   )}
 
-                  {/* One-line rationale only — the long explanatory
-                      paragraph + parenthetical was making the hero card
-                      a wall of text. The verdict / "what will happen"
-                      sections below cover the deeper reasoning when
-                      the user actually moves the slider. */}
-                  {!sameAsCurrent && (
+                  {/* Rationale */}
+                  {primaryLever === 'cost' && cl ? (
+                    <p className="text-sm text-primary-700 dark:text-primary-300 mt-2">
+                      Lifts profit by about <span className="font-semibold">SAR {Math.round(costLift)}/year</span> without changing demand
+                      {costFlipsAlone && cl.classificationAtCurrentPrice && (
+                        <>
+                          {' '}— and moves the item from{' '}
+                          {fromClass && (
+                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${fromClass.bg} ${fromClass.text} border ${fromClass.border}`}>
+                              {fromClass.emoji} {fromClass.label}
+                            </span>
+                          )}
+                          {' '}up to{' '}
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${getClassification(cl.classificationAtCurrentPrice).bg} ${getClassification(cl.classificationAtCurrentPrice).text} border ${getClassification(cl.classificationAtCurrentPrice).border}`}>
+                              {getClassification(cl.classificationAtCurrentPrice).emoji} {getClassification(cl.classificationAtCurrentPrice).label}
+                          </span>
+                          {' '}without touching the price
+                        </>
+                      )}
+                      .
+                    </p>
+                  ) : !sameAsCurrent && (
                     <p className="text-sm text-primary-700 dark:text-primary-300 mt-2">
                       {op.rationale || (direction === 'raise'
                         ? 'A small price bump would likely raise profit.'
@@ -559,18 +620,15 @@ const MenuEngineering = () => {
                     </p>
                   )}
 
-                  {/* Classification transition — always render when we
-                      have both classifications. Shows the manager
-                      exactly how the item changes category at the
-                      suggested price (the explicit "where does this
-                      land" answer the user asked for). When nothing
-                      changes we show a single "Stays in X" pill. */}
-                  {fromClass && toClass && (
+                  {/* Classification badge — only when cost is NOT the
+                      primary lever (cost-lead already shows the flip
+                      inline in the rationale above). */}
+                  {primaryLever === 'price' && fromClass && toClass && (
                     <div className="mt-3 pt-3 border-t border-primary-200 dark:border-primary-800/50 flex items-center gap-2 flex-wrap text-sm">
                       <span className="text-[11px] font-medium text-primary-700 dark:text-primary-300 uppercase tracking-wide mr-1">
-                        {transitionChanged ? 'Moves' : 'Stays as'}
+                        {priceFlips ? 'Moves' : 'Stays as'}
                       </span>
-                      {transitionChanged ? (
+                      {priceFlips ? (
                         <>
                           <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${fromClass.bg} ${fromClass.text} border ${fromClass.border}`}>
                             {fromClass.emoji} {fromClass.label}
@@ -588,45 +646,46 @@ const MenuEngineering = () => {
                     </div>
                   )}
 
-                  {/* Cost-lowering — surfaced for ANY direction, since
-                      cost reduction lifts profit independently of the
-                      price-elasticity tradeoff. Most useful for the
-                      'hold' case (Underperformer) where cost is the
-                      only practical lever the system can suggest;
-                      complementary for 'raise'; still informative for
-                      'lower'. The lead-in adapts to the direction so
-                      it reads naturally in all three cases. */}
-                  {op.costLowering && (() => {
-                    const cl = op.costLowering;
-                    const flipsAtCurrent = cl.flipsAtCurrentPrice;
-                    const flipsCombined = cl.movesClassification;
-                    const movesTo = (flipsAtCurrent || flipsCombined) && cl.newClassification
-                      ? getClassification(cl.newClassification)
-                      : null;
-                    const movesToAtCurrent = flipsAtCurrent && cl.classificationAtCurrentPrice
+                  {/* SECONDARY LEVER — shows the OTHER move as an
+                      additive-profit option. When primary=cost, this
+                      shows the price option. When primary=price, this
+                      shows the cost option (existing behavior). */}
+                  {primaryLever === 'cost' && !sameAsCurrent && (
+                    <div className="mt-3 pt-3 border-t border-primary-200 dark:border-primary-800/50 text-xs text-gray-700 dark:text-gray-300 leading-relaxed">
+                      <span className="font-semibold text-primary-700 dark:text-primary-300">↕ For more profit:</span>{' '}
+                      you can also move the price to <span className="font-semibold">SAR {suggestedInt}</span>{' '}
+                      (≈ {changePct > 0 ? '+' : ''}{changePct}% from SAR {currentPriceInt}) — that adds about
+                      {' '}<span className="font-semibold">SAR {Math.round(priceLift)}/year</span> on top of the cost saving.
+                    </div>
+                  )}
+                  {primaryLever === 'price' && cl && (() => {
+                    const movesToAtCurrent = cl.flipsAtCurrentPrice && cl.classificationAtCurrentPrice
                       ? getClassification(cl.classificationAtCurrentPrice)
+                      : null;
+                    const movesToCombined = cl.movesClassification && !cl.flipsAtCurrentPrice && cl.newClassification
+                      ? getClassification(cl.newClassification)
                       : null;
                     return (
                       <div className="mt-3 pt-3 border-t border-primary-200 dark:border-primary-800/50 text-xs text-gray-700 dark:text-gray-300 leading-relaxed space-y-1.5">
                         <div>
                           <span className="font-semibold text-emerald-700 dark:text-emerald-400">💰 Cost lever:</span>{' '}
                           bring unit cost down to <span className="font-semibold">SAR {cl.suggestedCost}</span> (↓{cl.reductionPct}% from SAR {Math.round(cl.currentCost)})
-                          {' '}— lifts profit by about <span className="font-semibold">SAR {Math.round(cl.additionalProfit)}/year</span> without changing demand.
+                          {' '}— lifts profit by about <span className="font-semibold">SAR {Math.round(costLift)}/year</span> without changing demand.
                         </div>
-                        {flipsAtCurrent && movesToAtCurrent && (
+                        {movesToAtCurrent && (
                           <div className="rounded bg-emerald-100/60 dark:bg-emerald-900/30 px-2 py-1 text-emerald-800 dark:text-emerald-200">
                             ⭐ <span className="font-semibold">Cost reduction alone is enough</span> to move this item to{' '}
                             <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${movesToAtCurrent.bg} ${movesToAtCurrent.text} border ${movesToAtCurrent.border}`}>
                               {movesToAtCurrent.emoji} {movesToAtCurrent.label}
                             </span>
-                            {' '}— even without changing the price.
+                            .
                           </div>
                         )}
-                        {flipsCombined && !flipsAtCurrent && movesTo && (
+                        {movesToCombined && (
                           <div className="rounded bg-emerald-100/60 dark:bg-emerald-900/30 px-2 py-1 text-emerald-800 dark:text-emerald-200">
                             🚀 With BOTH the price and cost moves applied, the item moves up to{' '}
-                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${movesTo.bg} ${movesTo.text} border ${movesTo.border}`}>
-                              {movesTo.emoji} {movesTo.label}
+                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${movesToCombined.bg} ${movesToCombined.text} border ${movesToCombined.border}`}>
+                              {movesToCombined.emoji} {movesToCombined.label}
                             </span>
                             .
                           </div>
