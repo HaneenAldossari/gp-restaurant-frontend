@@ -845,11 +845,8 @@ const Forecasting = () => {
                 <div className="rounded-lg border border-primary-200 dark:border-primary-800 bg-primary-50 dark:bg-primary-900/20 p-3 text-sm flex items-start gap-2">
                   <span className="flex-shrink-0 mt-0.5">📈</span>
                   <div className="leading-relaxed text-primary-900 dark:text-primary-200">
-                    Busiest hour-weekday in this window: <span className="font-semibold">{forecast.heatmapPeak.day} {forecast.heatmapPeak.hour}</span>
-                    {' '}— expected ~<span className="font-semibold">{forecast.heatmapPeak.value.toLocaleString()} units/hour</span>
-                    {forecast.heatmapPeak.vsAverage != null && forecast.heatmapPeak.vsAverage > 0 && (
-                      <> ({forecast.heatmapPeak.vsAverage > 0 ? '+' : ''}{forecast.heatmapPeak.vsAverage}% above average). Schedule extra staff there.</>
-                    )}
+                    Busiest hour-weekday: <span className="font-semibold">{forecast.heatmapPeak.day} {forecast.heatmapPeak.hour}</span>
+                    {' '}— ~<span className="font-semibold">{forecast.heatmapPeak.value.toLocaleString()} units</span> on a typical {forecast.heatmapPeak.day} at this hour.
                   </div>
                 </div>
               )}
