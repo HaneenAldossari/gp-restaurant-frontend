@@ -603,11 +603,24 @@ const MenuEngineering = () => {
                       : direction === 'lower'
                       ? 'Or try lowering the cost'
                       : 'Also try lowering the cost';
+                    const movesTo = cl.movesClassification && cl.newClassification
+                      ? getClassification(cl.newClassification)
+                      : null;
                     return (
                       <div className="mt-3 pt-3 border-t border-primary-200 dark:border-primary-800/50 text-xs text-gray-700 dark:text-gray-300 leading-relaxed">
                         <span className="font-semibold text-emerald-700 dark:text-emerald-400">💰 {lead}:</span>{' '}
                         bring unit cost down to <span className="font-semibold">SAR {cl.suggestedCost}</span> (↓{cl.reductionPct}% from SAR {Math.round(cl.currentCost)})
                         {' '}— that lifts profit by about <span className="font-semibold">SAR {Math.round(cl.additionalProfit)}/year</span> without changing demand.
+                        {movesTo && (
+                          <span className="block mt-1.5">
+                            <span className="font-semibold text-emerald-700 dark:text-emerald-400">🚀 Best-case:</span>{' '}
+                            with both the price and cost moves applied, the item moves up to{' '}
+                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${movesTo.bg} ${movesTo.text} border ${movesTo.border}`}>
+                              {movesTo.emoji} {movesTo.label}
+                            </span>
+                            .
+                          </span>
+                        )}
                       </div>
                     );
                   })()}
