@@ -588,21 +588,26 @@ const MenuEngineering = () => {
                     </div>
                   )}
 
-                  {/* Cost-lowering bonus — only meaningful when the
-                      suggested action is to RAISE the price. For Lower
-                      and Hold suggestions, telling the manager to also
-                      cut cost is either irrelevant ("the system says
-                      lower the price, why are you talking about cost?")
-                      or contradictory. The compact one-line layout
-                      replaces the previous block of header + value +
-                      paragraph + transition — same information, much
-                      less visual weight. */}
-                  {direction === 'raise' && op.costLowering && (() => {
+                  {/* Cost-lowering — surfaced for ANY direction, since
+                      cost reduction lifts profit independently of the
+                      price-elasticity tradeoff. Most useful for the
+                      'hold' case (Underperformer) where cost is the
+                      only practical lever the system can suggest;
+                      complementary for 'raise'; still informative for
+                      'lower'. The lead-in adapts to the direction so
+                      it reads naturally in all three cases. */}
+                  {op.costLowering && (() => {
                     const cl = op.costLowering;
+                    const lead = direction === 'raise'
+                      ? 'Also try lowering the cost'
+                      : direction === 'lower'
+                      ? 'Or try lowering the cost'
+                      : 'Also try lowering the cost';
                     return (
                       <div className="mt-3 pt-3 border-t border-primary-200 dark:border-primary-800/50 text-xs text-gray-700 dark:text-gray-300 leading-relaxed">
-                        <span className="font-semibold text-emerald-700 dark:text-emerald-400">💰 Compound it:</span>{' '}
-                        if you can also bring unit cost down to <span className="font-semibold">SAR {cl.suggestedCost}</span> (↓{cl.reductionPct}%), the profit lift gets bigger.
+                        <span className="font-semibold text-emerald-700 dark:text-emerald-400">💰 {lead}:</span>{' '}
+                        bring unit cost down to <span className="font-semibold">SAR {cl.suggestedCost}</span> (↓{cl.reductionPct}% from SAR {Math.round(cl.currentCost)})
+                        {' '}— that lifts profit by about <span className="font-semibold">SAR {Math.round(cl.additionalProfit)}/year</span> without changing demand.
                       </div>
                     );
                   })()}
@@ -830,41 +835,13 @@ const MenuEngineering = () => {
                     </div>
                   )}
 
-                  {/* Cost-lowering bonus — surfaced whenever the backend
-                      provided one. The earlier code gated this on
-                      priceWentUp + direction='raise', which made it
-                      invisible for Underperformers (where the
-                      direction is 'hold') and Plowhorses (where it's
-                      often 'lower'). Cost reduction is independent of
-                      the price-elasticity tradeoff — it ALWAYS helps —
-                      so the bonus is informative regardless of which
-                      direction the price suggestion is going. */}
-                  {sim?.recommendations?.optimalPrice?.costLowering && (() => {
-                    const cl = sim.recommendations.optimalPrice.costLowering;
-                    const dir = sim.recommendations.optimalPrice.direction;
-                    // Phrase the lead-in based on whether there's a
-                    // price move to "compound" or whether cost is the
-                    // primary lever (hold / lower / Underperformer).
-                    const lead = dir === 'raise'
-                      ? 'Compound it: if you can also bring unit cost down to about'
-                      : 'On the cost side: if you can bring unit cost down to about';
-                    return (
-                      <div className="rounded-lg p-3 text-xs border flex items-start gap-2 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300">
-                        <span className="flex-shrink-0 mt-0.5">💰</span>
-                        <div className="leading-relaxed">
-                          <span className="font-semibold">{lead.split(':')[0]}:</span>{' '}
-                          {lead.split(':')[1].trim()}
-                          <span className="font-semibold"> SAR {cl.suggestedCost}</span>{' '}
-                          (≈ {cl.reductionPct}% off SAR {Math.round(cl.currentCost)}),
-                          profit lifts by about <span className="font-semibold">SAR {Math.round(cl.additionalProfit)}/year</span>
-                          {cl.movesClassification && (
-                            <> and the item moves up to {getClassification(cl.newClassification).label}</>
-                          )}
-                          {' '}without touching demand. Worth a supplier conversation or a recipe review.
-                        </div>
-                      </div>
-                    );
-                  })()}
+                  {/* Cost-lowering bonus rendered inside the hero
+                      suggestion panel above (the consolidated view).
+                      Used to live here as a separate green banner; the
+                      separation forced a 'panel + banner' layout that
+                      read as two competing recommendations. Now that
+                      cost is part of the hero panel itself, the
+                      manager sees one consolidated suggestion. */}
                 </>
               );
             })()}
@@ -880,9 +857,21 @@ const MenuEngineering = () => {
               const op = sim.recommendations.optimalPrice;
               const cls = sim.current?.classification;
 
-              const elasticLine = isElastic
-                ? "Demand here is price-sensitive — sales rise sharply with discounts and drop sharply with raises (typical of sweets, desserts, premium items)."
-                : "Demand here is steady — customers buy regardless of small price moves (typical of coffee, tea, habit-driven items).";
+              // Rewrite the inelastic copy for Underperformers — calling
+              // a barely-selling item's demand 'steady' reads as a
+              // positive when it's actually neutral-bordering-bad
+              // (price-insensitive AND low volume = price isn't a lever
+              // at all). For other inelastic classifications (Star /
+              // Plowhorse / inelastic Hidden gem) the original copy is
+              // accurate.
+              let elasticLine;
+              if (isElastic) {
+                elasticLine = "Demand here is price-sensitive — sales rise sharply with discounts and drop sharply with raises (typical of sweets, desserts, premium items).";
+              } else if (cls === 'Dog') {
+                elasticLine = "Sales here are low AND don't respond much to price moves. Adjusting price won't unlock new customers, and discounts would just shrink margin without lifting volume.";
+              } else {
+                elasticLine = "Demand here is steady — customers buy regardless of small price moves (typical of coffee, tea, habit-driven items).";
+              }
 
               const whyByKind = {
                 test_increase: "Demand barely budges with small price moves, so a modest bump captures more margin per sale at no real volume risk.",
