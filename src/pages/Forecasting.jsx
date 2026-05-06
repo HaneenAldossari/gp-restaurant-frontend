@@ -137,13 +137,25 @@ const Forecasting = () => {
     return effectiveDays + daysSince;
   }, [effectiveDays, dataRange]);
 
+  // Reject inverted custom ranges (end before start). The date picker's
+  // `min` attribute usually catches this, but if the user changes the
+  // start date AFTER setting an end date, the end can be left earlier
+  // than start until they touch it again. Block generation in that
+  // state and show a hint inline.
+  const customRangeInvalid =
+    periodMode === 'custom'
+    && customStart
+    && customEnd
+    && new Date(customEnd) < new Date(customStart);
+
   // Is the form complete enough to generate?
   const canGenerate = useMemo(() => {
     if (scope === 'category' && !category) return false;
     if (scope === 'item' && (!category || !item)) return false;
     if (periodMode === 'custom' && (!customStart || !customEnd)) return false;
+    if (customRangeInvalid) return false;
     return true;
-  }, [scope, category, item, periodMode, customStart, customEnd]);
+  }, [scope, category, item, periodMode, customStart, customEnd, customRangeInvalid]);
 
   const generate = async () => {
     if (!canGenerate) return;
@@ -669,7 +681,17 @@ const Forecasting = () => {
                 <input
                   type="date"
                   value={customStart}
-                  onChange={(e) => setCustomStart(e.target.value)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setCustomStart(v);
+                    // If the new start is after the existing end, push
+                    // the end forward to keep the range valid instead
+                    // of leaving an inverted state the user has to fix
+                    // manually.
+                    if (v && customEnd && new Date(customEnd) < new Date(v)) {
+                      setCustomEnd(v);
+                    }
+                  }}
                   min={dataRange?.forecastStart}
                   max={dataRange?.forecastEndMax}
                   className="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200"
@@ -681,10 +703,20 @@ const Forecasting = () => {
                   onChange={(e) => setCustomEnd(e.target.value)}
                   min={customStart || dataRange?.forecastStart}
                   max={dataRange?.forecastEndMax}
-                  className="px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200"
+                  className={`px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-700 border text-gray-700 dark:text-gray-200 ${
+                    customRangeInvalid
+                      ? 'border-red-400 dark:border-red-500'
+                      : 'border-gray-200 dark:border-gray-600'
+                  }`}
                 />
-                <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">
-                  {customStart && customEnd ? `${effectiveDays} days` : 'Pick start and end dates'}
+                <span className={`text-xs ml-1 ${
+                  customRangeInvalid
+                    ? 'text-red-600 dark:text-red-400'
+                    : 'text-gray-500 dark:text-gray-400'
+                }`}>
+                  {customRangeInvalid
+                    ? 'End date must be after start date'
+                    : (customStart && customEnd ? `${effectiveDays} days` : 'Pick start and end dates')}
                 </span>
               </div>
             )}
