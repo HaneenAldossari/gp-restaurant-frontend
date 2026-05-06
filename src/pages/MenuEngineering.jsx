@@ -76,29 +76,55 @@ const MenuEngineering = () => {
 
   // Verdict rules. Operates only on price changes within ±25% of the
   // current price (the slider is clamped to that range — see the price
-  // slider's min/max in the JSX below). Constant-elasticity is a local
-  // approximation; beyond ±25% it extrapolates and the verdict logic
-  // would mislead the manager.
+  // slider's min/max in the JSX below).
   //
-  // For Dog (Underperformer) and Puzzle (Hidden gem), the pure constant-
-  // elasticity profit model is misleading in BOTH directions:
-  //  - Raising the price: model often predicts higher profit (because
-  //    demand is tiny, so the qty drop matters little), but in reality
-  //    raising prices on a failing item accelerates its decline. → bad.
-  //  - Discounting: model shows profit dipping because margin shrinks on
-  //    already-low volume. But a discount is the recommended recovery
-  //    strategy — menu-engineering theory says test price-cuts, promote,
-  //    or replace. Short-term profit sacrifice is the cost of finding
-  //    out whether the item can be saved. → good (aligned with strategy).
+  // For Dog (Underperformer) and Puzzle (Hidden gem), the recommended
+  // direction depends on elasticity, mirroring the backend's optimal-
+  // price logic in routes_menu.py:
   //
-  //   good    → profit goes up and fewer than 15% of customers walk away,
-  //             OR a price cut on a Dog/Puzzle (strategic test)
-  //   risky   → profit goes up but more than 15% fewer customers
-  //   bad     → profit goes down, OR a price raise on a Dog/Puzzle
-  function verdictFor(currentQty, newQty, currentProfit, newProfit, priceWentUp, priceWentDown, classification) {
+  //   ELASTIC (|e| > 1.05) — demand is price-sensitive
+  //     • Discount → good. Strategic test: a Hidden gem may pick up
+  //       with a small cut; an Underperformer's recovery test is a
+  //       discount before considering removal.
+  //     • Raise   → bad. Wrong direction for an item already short
+  //       on volume.
+  //
+  //   INELASTIC (|e| ≤ 1.05) — demand is steady regardless of price
+  //     • Hidden gem (Puzzle):
+  //         - Raise → good. Customers who want this item buy it at
+  //           any reasonable price; profit lift comes from margin,
+  //           not volume. The right strategic move is a small price
+  //           test paired with merchandising / visibility.
+  //         - Discount → bad. Shrinks margin without unlocking
+  //           demand the model says isn't there.
+  //     • Underperformer (Dog):
+  //         - Either direction → bad. The product is the problem,
+  //           not the price. Recipe rework or removal.
+  //
+  // Reviewer-flagged conflict that this elasticity-aware logic fixes:
+  // a Hidden gem with e=−0.5 had the suggested-price card showing
+  // "Raise to SAR 18 (+5.9%) — visibility play" while the verdict
+  // box (with the old logic) showed "Not recommended. Wrong
+  // direction for a Puzzle. Discount to unlock demand." The two
+  // contradicted each other because the verdict ignored elasticity.
+  function verdictFor(currentQty, newQty, currentProfit, newProfit, priceWentUp, priceWentDown, classification, elasticity) {
     const isDogOrPuzzle = classification === 'Dog' || classification === 'Puzzle';
-    if (priceWentUp && isDogOrPuzzle) return 'bad';
-    if (priceWentDown && isDogOrPuzzle) return 'good';
+    if (isDogOrPuzzle) {
+      const isElastic = typeof elasticity === 'number' && elasticity < -1.05;
+      if (isElastic) {
+        if (priceWentUp)   return 'bad';
+        if (priceWentDown) return 'good';
+      } else {
+        // Inelastic
+        if (classification === 'Puzzle') {
+          if (priceWentUp)   return 'good';
+          if (priceWentDown) return 'bad';
+        } else {
+          // Inelastic Dog: neither direction is the lever
+          if (priceWentUp || priceWentDown) return 'bad';
+        }
+      }
+    }
     if (newProfit <= currentProfit) return 'bad';
     if (newQty < currentQty * 0.85) return 'risky';
     return 'good';
@@ -655,22 +681,42 @@ const MenuEngineering = () => {
               const priceWentUp = priceDelta > 0;
               const priceWentDown = priceDelta < 0;
               const itemClass = targetItem?.classification;
-              const verdict = verdictFor(currQty, newQty, sim.current.profit, sim.simulated.newProfit, priceWentUp, priceWentDown, itemClass);
+              const elasticity = sim?.elasticity;
+              const verdict = verdictFor(currQty, newQty, sim.current.profit, sim.simulated.newProfit, priceWentUp, priceWentDown, itemClass, elasticity);
 
-              // Tailored body text for the two Dog/Puzzle cases where the
-              // verdict overrides the pure profit math.
+              // Tailored body text for Dog / Puzzle cases. The right
+              // direction depends on elasticity — see verdictFor's
+              // comment for the full rule. We mirror the four cases
+              // here so the verdict box says WHY each direction is
+              // good or bad in plain language for the manager.
               const isDogOrPuzzle = itemClass === 'Dog' || itemClass === 'Puzzle';
-              const dogPuzzleRaiseBody = itemClass === 'Dog'
-                ? 'Wrong direction for a Dog. Discount or replace.'
-                : 'Wrong direction for a Puzzle. Discount to unlock demand.';
-              const dogPuzzleDiscountBody = itemClass === 'Dog'
-                ? 'Aligned with strategy — discounting a Dog is the recommended test. Short-term profit may dip, but that’s the cost of finding out if the item can recover.'
-                : 'Aligned with strategy — a Puzzle often picks up with a discount. Run this as a 2–4 week test and watch demand.';
+              const isElastic = typeof elasticity === 'number' && elasticity < -1.05;
 
               let goodBody = 'Profit up, demand holds. Safe to try.';
               let badBody = 'Profit drops. Try a different price.';
-              if (priceWentDown && isDogOrPuzzle) goodBody = dogPuzzleDiscountBody;
-              if (priceWentUp && isDogOrPuzzle)   badBody = dogPuzzleRaiseBody;
+
+              if (isDogOrPuzzle) {
+                if (isElastic) {
+                  // Elastic Dog/Puzzle: discount unlocks demand
+                  if (priceWentDown) goodBody = itemClass === 'Dog'
+                    ? 'Aligned with strategy — discounting an elastic Underperformer is the recommended recovery test. Short-term profit may dip; that’s the cost of finding out if it can come back.'
+                    : 'Aligned with strategy — an elastic Hidden gem often picks up with a small discount. Run as a 2-4 week test and watch demand.';
+                  if (priceWentUp) badBody = itemClass === 'Dog'
+                    ? 'Wrong direction for an elastic Underperformer. Discount or remove.'
+                    : 'Wrong direction for an elastic Hidden gem. Discount to unlock demand.';
+                } else {
+                  // Inelastic Dog/Puzzle: discount won't unlock demand
+                  if (itemClass === 'Puzzle') {
+                    if (priceWentUp) goodBody = 'Aligned with strategy — Hidden gem with steady demand. Profit lift comes from margin. Pair the price test with a menu feature or staff recommendation to also drive volume.';
+                    if (priceWentDown) badBody = 'Discount won’t unlock demand here — sales don’t respond to price changes much. You’d shrink margin without lifting volume.';
+                  } else {
+                    // Inelastic Dog: nothing helps, both directions bad
+                    badBody = priceWentUp
+                      ? 'Raising the price on an Underperformer accelerates its decline. Demand here is also price-insensitive, so a discount won’t recover it. The product itself is the problem — rework or remove.'
+                      : 'Demand here doesn’t respond to discounts, so a price cut just shrinks margin. The product itself is the problem — rework or remove.';
+                  }
+                }
+              }
 
               const verdictStyles = {
                 good:  { bg: 'bg-success-50 dark:bg-success-900/20', border: 'border-success-200 dark:border-success-800', text: 'text-success-700 dark:text-success-300', title: 'Good idea',       Icon: CheckCircle2,  body: goodBody },
