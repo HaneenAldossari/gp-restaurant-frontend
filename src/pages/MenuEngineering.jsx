@@ -865,6 +865,50 @@ const MenuEngineering = () => {
               );
             })()}
 
+            {/* "Why this price" — short demo explainer, manager-friendly.
+                Surfaces whether the item is elastic or not (in plain
+                language, no jargon) and one line on why the suggestion
+                landed where it did. Easy to remove later by deleting
+                this block. */}
+            {sim && sim.elasticity != null && sim?.recommendations?.optimalPrice && (() => {
+              const e = sim.elasticity;
+              const isElastic = e < -1.05;
+              const op = sim.recommendations.optimalPrice;
+              const cls = sim.current?.classification;
+
+              const elasticLine = isElastic
+                ? "Demand here is price-sensitive — sales rise sharply with discounts and drop sharply with raises (typical of sweets, desserts, premium items)."
+                : "Demand here is steady — customers buy regardless of small price moves (typical of coffee, tea, habit-driven items).";
+
+              const whyByKind = {
+                test_increase: "Demand barely budges with small price moves, so a modest bump captures more margin per sale at no real volume risk.",
+                puzzle_visibility: "Demand is insensitive to price, so cutting the price would shrink margin without lifting volume. The lever is visibility (menu feature, combo, staff recommendation); a small price test funds the merchandising.",
+                puzzle_discount: "A small discount triggers a larger volume increase than the price cut, so total profit rises. Run as a 2-4 week test and watch demand.",
+                dog_discount: "An underperformer with price-sensitive demand — a discount is the standard recovery test before considering removal. Short-term profit may dip; that's the cost of finding out if the item can come back.",
+                dog_remove: "Demand here is price-insensitive AND volume is low. Price isn't the lever; the product itself needs rework or removal.",
+                capped_up: "The profit-maximizing price for this elasticity sits above the current price. Suggestion is capped at +20% from current to avoid testing too far at once.",
+                capped_down: "The profit-maximizing price for this elasticity sits BELOW the current price — for elastic items, the volume gained from a discount more than compensates the per-unit margin loss. Suggestion is capped at -20% for safety.",
+                direct: "This is the calculated profit-maximizing price given the demand sensitivity for this category.",
+              };
+              const why = whyByKind[op.kind] || "Suggestion follows the demand model for this category.";
+
+              return (
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 p-3 text-xs text-gray-700 dark:text-gray-300 space-y-2">
+                  <div>
+                    <span className="font-semibold text-gray-900 dark:text-white">
+                      {isElastic ? 'Elastic' : 'Inelastic'} item
+                    </span>
+                    <span className="text-gray-500 dark:text-gray-400"> · elasticity = {e}</span>
+                    <p className="mt-0.5">{elasticLine}</p>
+                  </div>
+                  <div>
+                    <span className="font-semibold text-gray-900 dark:text-white">Why this suggestion</span>
+                    <p className="mt-0.5">{why}</p>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Honest note about how the estimates are made — collapsed by default */}
             {sim && (
               <details className="text-xs text-gray-500 dark:text-gray-400">
