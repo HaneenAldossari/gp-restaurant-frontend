@@ -830,33 +830,37 @@ const MenuEngineering = () => {
                     </div>
                   )}
 
-                  {/* Cost-lowering reminder — only when BOTH:
-                        • the user has moved the slider UP (priceWentUp), AND
-                        • the model's recommended direction is also "raise"
-                      Without the second gate, sliding the price up on an
-                      Underperformer (where the actual recommendation is
-                      to discount) would surface a contradictory message
-                      that says "a price increase alone helps margin"
-                      while the verdict above says "Not recommended,
-                      wrong direction." */}
-                  {priceWentUp
-                    && sim?.recommendations?.optimalPrice?.direction === 'raise'
-                    && sim?.recommendations?.optimalPrice?.costLowering
-                    && (() => {
+                  {/* Cost-lowering bonus — surfaced whenever the backend
+                      provided one. The earlier code gated this on
+                      priceWentUp + direction='raise', which made it
+                      invisible for Underperformers (where the
+                      direction is 'hold') and Plowhorses (where it's
+                      often 'lower'). Cost reduction is independent of
+                      the price-elasticity tradeoff — it ALWAYS helps —
+                      so the bonus is informative regardless of which
+                      direction the price suggestion is going. */}
+                  {sim?.recommendations?.optimalPrice?.costLowering && (() => {
                     const cl = sim.recommendations.optimalPrice.costLowering;
+                    const dir = sim.recommendations.optimalPrice.direction;
+                    // Phrase the lead-in based on whether there's a
+                    // price move to "compound" or whether cost is the
+                    // primary lever (hold / lower / Underperformer).
+                    const lead = dir === 'raise'
+                      ? 'Compound it: if you can also bring unit cost down to about'
+                      : 'On the cost side: if you can bring unit cost down to about';
                     return (
                       <div className="rounded-lg p-3 text-xs border flex items-start gap-2 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300">
                         <span className="flex-shrink-0 mt-0.5">💰</span>
                         <div className="leading-relaxed">
-                          <span className="font-semibold">Compound it:</span>{' '}
-                          if you can also bring unit cost down to about
+                          <span className="font-semibold">{lead.split(':')[0]}:</span>{' '}
+                          {lead.split(':')[1].trim()}
                           <span className="font-semibold"> SAR {cl.suggestedCost}</span>{' '}
                           (≈ {cl.reductionPct}% off SAR {Math.round(cl.currentCost)}),
-                          the profit lift is much bigger
+                          profit lifts by about <span className="font-semibold">SAR {Math.round(cl.additionalProfit)}/year</span>
                           {cl.movesClassification && (
                             <> and the item moves up to {getClassification(cl.newClassification).label}</>
                           )}
-                          .
+                          {' '}without touching demand. Worth a supplier conversation or a recipe review.
                         </div>
                       </div>
                     );
