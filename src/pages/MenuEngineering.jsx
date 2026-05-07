@@ -177,7 +177,7 @@ const MenuEngineering = () => {
       <EmptyState
         emoji="🍽️"
         title="Menu insights will light up here"
-        message="Upload your sales file and we'll classify your items into Hero items, Popular tight-margin sellers, Hidden gems, and Underperformers."
+        message="Upload your sales file and we'll classify your items into Stars, Plowhorses, Puzzles, and Dogs using the Boston Matrix framework."
       />
     );
   }
@@ -268,11 +268,11 @@ const MenuEngineering = () => {
       totals: ['Total', fmtNum(items.length), fmtNum(totalRev), '100.0%', ''],
     });
 
-    // 2. Hero items — keep featuring (top 10 by revenue)
+    // 2. Stars — keep featuring (top 10 by revenue)
     if (grouped.Star.length) {
       const top = grouped.Star.slice(0, 10);
       sections.push({
-        name: '⭐ Hero items — keep featuring, protect supply',
+        name: '⭐ Stars — keep featuring, protect supply',
         kind: 'table',
         columns: ['Product', 'Category', 'Units', 'Revenue (SAR)', 'Margin'],
         rows: top.map((it) => [
@@ -282,12 +282,12 @@ const MenuEngineering = () => {
       });
     }
 
-    // 3. Popular but tight margin (top 10 by revenue);
+    // 3. Plowhorses — high popularity, low margin (top 10 by revenue);
     // these are the highest-leverage price/cost interventions
     if (grouped.Plowhorse.length) {
       const top = grouped.Plowhorse.slice(0, 10);
       sections.push({
-        name: '🔥 Popular, tight margin — raise price or cut cost',
+        name: '🔥 Plowhorses — raise price or cut cost',
         kind: 'table',
         columns: ['Product', 'Category', 'Units', 'Price (SAR)', 'Cost (SAR)', 'Margin'],
         rows: top.map((it) => [
@@ -298,13 +298,13 @@ const MenuEngineering = () => {
       });
     }
 
-    // 4. Hidden gems — high margin, low volume; promote these
+    // 4. Puzzles — high margin, low volume; promote these
     if (grouped.Puzzle.length) {
       // Sort by margin (highest first) since revenue is small;
       // a manager wants to know "which one has the BEST profit per sale"
       const top = [...grouped.Puzzle].sort((a, b) => (b.profitMargin || 0) - (a.profitMargin || 0)).slice(0, 10);
       sections.push({
-        name: '🧩 Hidden gems — feature in promotions',
+        name: '🧩 Puzzles — feature in promotions',
         kind: 'table',
         columns: ['Product', 'Category', 'Margin', 'Revenue (SAR)', 'Units'],
         rows: top.map((it) => [
@@ -314,11 +314,11 @@ const MenuEngineering = () => {
       });
     }
 
-    // 5. Underperformers — rework or remove (bottom 10 by revenue)
+    // 5. Dogs — rework or remove (bottom 10 by revenue)
     if (grouped.Dog.length) {
       const bottom = [...grouped.Dog].sort((a, b) => (a.revenue || 0) - (b.revenue || 0)).slice(0, 10);
       sections.push({
-        name: '⚠️ Underperformers — rework recipe or remove',
+        name: '⚠️ Dogs — rework recipe or remove',
         kind: 'table',
         columns: ['Product', 'Category', 'Units', 'Revenue (SAR)', 'Margin'],
         rows: bottom.map((it) => [
@@ -865,20 +865,20 @@ const MenuEngineering = () => {
                 if (isElastic) {
                   // Elastic Dog/Puzzle: discount unlocks demand
                   if (priceWentDown) goodBody = itemClass === 'Dog'
-                    ? 'Aligned with strategy — discounting an elastic Underperformer is the recommended recovery test. Short-term profit may dip; that’s the cost of finding out if it can come back.'
-                    : 'Aligned with strategy — an elastic Hidden gem often picks up with a small discount. Run as a 2-4 week test and watch demand.';
+                    ? 'Aligned with strategy — discounting an elastic Dog is the recommended recovery test. Short-term profit may dip; that’s the cost of finding out if it can come back.'
+                    : 'Aligned with strategy — an elastic Puzzle often picks up with a small discount. Run as a 2-4 week test and watch demand.';
                   if (priceWentUp) badBody = itemClass === 'Dog'
-                    ? 'Wrong direction for an elastic Underperformer. Discount or remove.'
-                    : 'Wrong direction for an elastic Hidden gem. Discount to unlock demand.';
+                    ? 'Wrong direction for an elastic Dog. Discount or remove.'
+                    : 'Wrong direction for an elastic Puzzle. Discount to unlock demand.';
                 } else {
                   // Inelastic Dog/Puzzle: discount won't unlock demand
                   if (itemClass === 'Puzzle') {
-                    if (priceWentUp) goodBody = 'Aligned with strategy — Hidden gem with steady demand. Profit lift comes from margin. Pair the price test with a menu feature or staff recommendation to also drive volume.';
+                    if (priceWentUp) goodBody = 'Aligned with strategy — Puzzle with steady demand. Profit lift comes from margin. Pair the price test with a menu feature or staff recommendation to also drive volume.';
                     if (priceWentDown) badBody = 'Discount won’t unlock demand here — sales don’t respond to price changes much. You’d shrink margin without lifting volume.';
                   } else {
                     // Inelastic Dog: nothing helps, both directions bad
                     badBody = priceWentUp
-                      ? 'Raising the price on an Underperformer accelerates its decline. Demand here is also price-insensitive, so a discount won’t recover it. The product itself is the problem — rework or remove.'
+                      ? 'Raising the price on a Dog accelerates its decline. Demand here is also price-insensitive, so a discount won’t recover it. The product itself is the problem — rework or remove.'
                       : 'Demand here doesn’t respond to discounts, so a price cut just shrinks margin. The product itself is the problem — rework or remove.';
                   }
                 }
