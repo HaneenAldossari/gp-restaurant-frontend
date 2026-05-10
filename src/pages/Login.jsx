@@ -68,24 +68,10 @@ const Login = () => {
             & Forecasting System
           </h1>
           <p className="text-xl text-white/80 max-w-md">
-            Transform your restaurant&apos;s raw POS data into actionable business intelligence with AI-powered analytics.
+            Transform your restaurant&apos;s POS data into actionable business
+            intelligence — sales analytics, demand forecasting, and menu
+            engineering in one platform.
           </p>
-          <div className="flex items-center gap-6 pt-4">
-            <div className="text-center">
-              <div className="text-3xl font-bold text-white">92%</div>
-              <div className="text-sm text-white/70">Forecast Accuracy</div>
-            </div>
-            <div className="w-px h-12 bg-white/30"></div>
-            <div className="text-center">
-              <div className="text-3xl font-bold text-white">4x</div>
-              <div className="text-sm text-white/70">Faster Insights</div>
-            </div>
-            <div className="w-px h-12 bg-white/30"></div>
-            <div className="text-center">
-              <div className="text-3xl font-bold text-white">24/7</div>
-              <div className="text-sm text-white/70">Real-time Data</div>
-            </div>
-          </div>
         </div>
 
         <div className="relative z-10 text-sm text-white/60">
