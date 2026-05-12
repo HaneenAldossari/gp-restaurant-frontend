@@ -355,12 +355,7 @@ const MenuEngineering = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <Database size={12} />
-          {loading ? 'Loading menu analysis…' : 'Live analysis'}
-        </div>
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <ExportMenu
           buildReport={buildMenuReport}
           baseFilename="menu-insights-report"
